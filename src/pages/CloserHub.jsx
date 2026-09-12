@@ -40,6 +40,8 @@ const SETTING_FIELDS = [
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
   ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
   ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
+  ['notes_summariser_url', 'Call summariser link', 'The ChatGPT or Claude summariser used for post-call notes.'],
+  ['ghl_location_id', 'GoHighLevel location id', 'Lets the checklist open the contact card directly.'],
   ['send_subject', 'Email subject when sending', ''],
   ['send_message', 'Email message when sending', ''],
 ]
@@ -152,9 +154,11 @@ function AppLink({ tool, first }) {
 function PaymentLinks({ settings, copy, dealRegion }) {
   // US / AU / NZ only (Ben, 12 Sep 2026: "I don't want to have an All tab").
   // Follows the open deal's region, else the last one picked on this device.
-  const [picked, setPicked] = useState(() => { try { return localStorage.getItem('closer-hub-pay-region') || '' } catch { return '' } })
-  const region = dealRegion || picked || 'us'
-  const setRegion = (r) => { setPicked(r); try { localStorage.setItem('closer-hub-pay-region', r) } catch { /* fine */ } }
+  const [region, setRegionState] = useState(() => { try { return dealRegion || localStorage.getItem('closer-hub-pay-region') || 'us' } catch { return dealRegion || 'us' } })
+  // The open deal's region is where the tab starts; a click always wins
+  // (12 Sep 2026: the deal's region was overriding every click).
+  useEffect(() => { if (dealRegion) setRegionState(dealRegion) }, [dealRegion])
+  const setRegion = (r) => { setRegionState(r); try { localStorage.setItem('closer-hub-pay-region', r) } catch { /* fine */ } }
   const rows = REGIONS.flatMap(([r, label]) => [['trial', 'Trial'], ['monthly', 'Monthly'], ['quarterly', 'Quarterly']].map(([k, kl]) => ({
     region: r, label: `${label} ${kl}`, url: settings[`pay_link_${r}_${k}`] || '',
   })))
@@ -288,18 +292,22 @@ function SidePanel({ settings, copy, isAdmin, onSaved, dealRegion }) {
 
 /* ── The deal as a checklist ───────────────────────────────────────────── */
 
+const slugOf = (name) => String(name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 73)
 const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '', region: 'us' }
 const REGIONS = [['us', 'USA'], ['au', 'AU'], ['nz', 'NZ']]
 const regionOf = (country) => { const c = String(country || '').toUpperCase(); return c === 'AU' || c === 'AUSTRALIA' ? 'au' : c === 'NZ' || c === 'NEW ZEALAND' ? 'nz' : 'us' }
 
 // Ben's list, 12 Sep 2026, in his order.
+// Ben's list, 12 Sep 2026, in his order. Channels and the card move are done
+// by hand in Slack and GoHighLevel ("there should be no button for that one").
 const STEPS = [
   ['payment', 'Take payment', 'Commas by default. Stripe only if Commas will not work for them. Ticks itself when the payment lands.'],
   ['contract', 'Send contract', 'Drafts it in PandaDoc and sends the signing links in one go. Draft only if you want to look first.'],
-  ['channels', 'Make client channel and add the client', 'Makes client- for the team and opt- for the client, then add the client to opt- as a guest in Slack.'],
-  ['form', 'Send onboarding form and book onboarding call', 'Send the form after payment, then book the kickoff for the next day. On a trial, forward-book the ascension call too.'],
+  ['channel_client', 'Make client channel', 'In Slack: client-<business>, private, the account-management team.'],
+  ['channel_opt', 'Make opt channel and add the client', 'In Slack: opt-<business>, private, the team plus the client as a guest.'],
+  ['form', 'Send onboarding form and book onboarding call', 'Send the page after payment, then book the kickoff for the next day. On a trial, forward-book the ascension call too.'],
   ['ghl', 'Move in GoHighLevel', 'Closed for a trial, New Map Closes for a retainer. This posts the close and starts onboarding.'],
-  ['notes', 'Leave post-call notes', 'On the card: who they are, what they are like, the Fathom transcript for the account manager.'],
+  ['notes', 'Leave post-call notes in the Slack channel', 'Who they are, what they are like, what was promised. Run the recording through the summariser first.'],
   ['eod', 'Log end of day', 'Closes only count once they are in.'],
 ]
 
@@ -522,18 +530,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
     const t = setInterval(() => { refreshContract(true).catch(() => {}) }, 60_000)
     return () => clearInterval(t)
   }, [deal?.id, deal?.data?.contract?.doc_id, deal?.data?.contract?.sent, deal?.data?.contract?.status])  // eslint-disable-line react-hooks/exhaustive-deps
-  const make = () => run('channels', async () => {
-    const r = await callCloserHub('make_channel', { company: form.company, email: form.email, prospect_name: form.name })
-    await record('channels', r); toast.success('Channels ready. Now add the client as a guest.'); onDone?.()
-  })
-  const moveCard = () => run('ghl', async () => {
-    const r = await callCloserHub('ghl_move', { email: form.email, offer: form.offer, contact_id: (d.ghl_contact || contact)?.id })
-    await record('ghl', r, r.ok ? 'ghl' : undefined)
-    setNote(n => ({ ...n, ghl: r.ok ? { ok: r.already ? r.message : `Moved to ${r.stage} (${r.region}).` } : { warn: r.message } }))
-  })
 
-  const ch = d.channels?.channels
-  const p = d.channels?.prospect
   const doneCount = STEPS.filter(([k]) => ticks[k]).length
 
   return (
@@ -625,7 +622,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
         {STEPS.map(([key, title, hint], i) => {
           const n = note[key]
           const on = !!ticks[key]
-          const auto = ['payment', 'contract', 'ghl'].includes(key)
+          const auto = ['payment', 'contract'].includes(key)
           return (
             <div key={key} className="flex items-start gap-3" style={{ padding: '14px 0', borderTop: i ? '1px solid var(--rule)' : 0, opacity: on ? .72 : 1 }}>
               <div style={{ paddingTop: 2 }}><Tick on={on} auto={auto && on} onChange={(v) => tick(key, v).catch(e => toast.error(e.message))} /></div>
@@ -642,43 +639,56 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                       {!on && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkPayment} disabled={busy === 'paycheck'}>{busy === 'paycheck' ? 'Checking' : 'Check for payment'}</button>}
                     </>
                   )}
-                  {key === 'contract' && (
+                  {key === 'contract' && !d.contract?.doc_id && (
                     <>
-                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send' || busy === 'contract'}>{busy === 'send' ? 'Working' : 'Send contract'}</button>}
-                      {confirmSend && !d.contract?.sent && (
-                        <>
-                          <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{d.contract?.doc_id ? 'Emails' : 'Drafts it and emails'} the signing links now: <b>{signer?.name || 'nobody picked'}</b> signs for OPT, the client is <b>{form.name || 'no name yet'}</b> at <b>{form.email}</b>. Sure?</span>
-                          <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={d.contract?.doc_id ? send : sendContract} disabled={busy === 'send'}>{busy === 'send' ? 'Sending' : 'Yes, send'}</button>
-                          <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(false)}>Not yet</button>
-                        </>
-                      )}
-                      {!d.contract?.sent && !confirmSend && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : d.contract?.doc_id ? 'Draft again' : 'Draft only'}</button>}
-                      {d.contract?.url && <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>}
-                      {d.contract?.signing_link && <LinkButton label="Client signing link" url={d.contract.signing_link} copy={copy} />}
-                      {d.contract?.doc_id && d.contract?.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Refresh status'}</button>}
+                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send' || busy === 'contract' || confirmSend}>{busy === 'send' ? 'Working' : 'Send contract'}</button>
+                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract' || busy === 'send'}>{busy === 'contract' ? 'Drafting' : 'Draft only'}</button>
                     </>
                   )}
-                  {key === 'channels' && (
+                  {key === 'contract' && d.contract?.doc_id && !d.contract?.sent && (
                     <>
-                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={make} disabled={busy === 'channels'}>{busy === 'channels' ? 'Making' : ch ? 'Make again' : 'Make the channels'}</button>
-                      {ch && ['internal', 'external'].map(k => ch[k]?.id && <a key={k} href={`https://slack.com/app_redirect?channel=${ch[k].id}`} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>#{ch[k].name}</a>)}
-                      {ch && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(form.email)}>Copy {form.email}</button>}
-                      {p?.ok && <span style={{ fontSize: 12.5, color: 'var(--house-good)' }}>Slack emailed them an invite.</span>}
+                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => setConfirmSend(true)} disabled={busy === 'send' || confirmSend}>{busy === 'send' ? 'Sending' : `Send to ${form.email}`}</button>
+                      <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Review in PandaDoc <ExternalLink size={ICON.sm} /></a>
+                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : 'Draft again'}</button>
                     </>
                   )}
-                  {key === 'ghl' && (
+                  {key === 'contract' && d.contract?.sent && (
                     <>
-                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={moveCard} disabled={busy === 'ghl' || on}>{busy === 'ghl' ? 'Moving' : 'Move the card'}</button>
-                      <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open GoHighLevel</a>
+                      <a href={d.contract.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in PandaDoc <ExternalLink size={ICON.sm} /></a>
+                      {d.contract.signing_link && <LinkButton label="Client signing link" url={d.contract.signing_link} copy={copy} />}
+                      {d.contract.status !== 'document.completed' && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={checkSigned} disabled={busy === 'signed'}>{busy === 'signed' ? 'Checking' : 'Refresh status'}</button>}
                     </>
                   )}
+                  {key === 'contract' && confirmSend && !d.contract?.sent && (
+                    <div className="flex items-center gap-2 flex-wrap w-full" style={{ padding: '8px 12px', border: '1px solid var(--rule)', borderRadius: 'var(--house-radius-input)', background: 'var(--paper-2)' }}>
+                      <span style={{ fontSize: 12.5, color: 'var(--ink-2)' }}>{d.contract?.doc_id ? 'Emails' : 'Drafts it and emails'} the signing links now: <b>{signer?.name || 'nobody picked'}</b> signs for OPT, the client is <b>{form.name || 'no name yet'}</b> at <b>{form.email}</b>.</span>
+                      <button type="button" className="editorial-btn-primary" style={{ height: 30, fontSize: 12.5 }} onClick={d.contract?.doc_id ? send : sendContract} disabled={busy === 'send'}>{busy === 'send' ? 'Working' : 'Yes, send'}</button>
+                      <button type="button" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }} onClick={() => setConfirmSend(false)}>Not yet</button>
+                    </div>
+                  )}
+                  {key === 'channel_client' && <LinkButton label={`client-${slugOf(form.company)}`} url={`client-${slugOf(form.company)}`} copy={copy} />}
+                  {key === 'channel_opt' && (
+                    <>
+                      <LinkButton label={`opt-${slugOf(form.company)}`} url={`opt-${slugOf(form.company)}`} copy={copy} />
+                      <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(form.email)}><Copy size={ICON.sm} /> {form.email}</button>
+                      <a href="https://app.slack.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open Slack <ExternalLink size={ICON.sm} /></a>
+                    </>
+                  )}
+                  {key === 'ghl' && <a href={(d.ghl_contact || contact)?.id ? `https://app.gohighlevel.com/v2/location/${settings.ghl_location_id || ''}/contacts/detail/${(d.ghl_contact || contact).id}` : 'https://app.gohighlevel.com/'} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open in GoHighLevel <ExternalLink size={ICON.sm} /></a>}
                   {key === 'form' && (
                     <>
                       <LinkButton label="Onboarding page" url={settings.onboarding_page_url || 'https://onboard.optdigital.io/onboarding'} copy={copy} primary />
                       <LinkButton label="Onboarding calendar" url={settings.onboarding_calendar_url || 'https://calendly.com/d/dzy3-78x-dr3/opt-digital-onboarding'} copy={copy} />
                     </>
                   )}
-                  {key === 'notes' && <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open the card</a>}
+                  {key === 'notes' && (
+                    <>
+                      {settings.notes_summariser_url
+                        ? <a href={settings.notes_summariser_url} target="_blank" rel="noopener" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }}>Call summariser <ExternalLink size={ICON.sm} /></a>
+                        : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>Summariser link not set. Admin adds it in Hub settings.</span>}
+                      <a href="https://app.slack.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open Slack <ExternalLink size={ICON.sm} /></a>
+                    </>
+                  )}
                   {key === 'eod' && <Link to="/sales/eod" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open End of Day</Link>}
                 </div>
                 {n?.info && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-2)' }}>{n.info}</div>}
@@ -686,8 +696,6 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                 {n?.warn && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-warn)' }}>{n.warn}</div>}
                 {n?.bad && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-bad)' }}>{n.bad}</div>}
                 {key === 'contract' && d.contract?.name && <ContractStrip c={d.contract} />}
-                {key === 'channels' && ch && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>Now in Slack: open #{ch.external?.name}, Add people, paste the email, choose Guest. Then tick this off.</div>}
-                {key === 'ghl' && d.ghl?.candidates?.length > 1 && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-3)' }}>{d.ghl.candidates.map(c => `${c.name || c.id} (${c.region})`).join(', ')}</div>}
               </div>
             </div>
           )
