@@ -14,12 +14,12 @@ import { callCloserHub, loadCloserHubSettings, saveCloserHubSettings } from '../
    badges. Closers and admins only (CloserRoute). */
 
 const SETTING_FIELDS = [
-  ['opt_rep_name', 'OPT signer name', 'Who signs for Opt Digital on every agreement.'],
-  ['opt_rep_email', 'OPT signer email', 'Must be a PandaDoc member.'],
+  ['opt_rep_name', 'Fallback OPT signer name', 'Used only if nobody is picked in step 2.'],
+  ['opt_rep_email', 'Fallback OPT signer email', ''],
   ['fee_retainer', 'Retainer fee (monthly)', 'Digits only.'],
   ['fee_trial', 'Trial fee', 'Digits only.'],
-  ['template_retainer', 'PandaDoc template: retainer', 'The Local SEO client agreement template id.'],
-  ['template_trial', 'PandaDoc template: trial', 'Blank until a trial template exists in PandaDoc.'],
+  ['template_retainer', 'PandaDoc template: retainer', 'The default picked when the deal type is Retainer.'],
+  ['template_trial', 'PandaDoc template: trial', 'The default picked when the deal type is Trial.'],
   ['role_opt', 'Template role: OPT', 'Usually "Role 1".'],
   ['role_client', 'Template role: client', '"Client" on the retainer template.'],
   ['send_subject', 'Email subject when sending', ''],
@@ -152,9 +152,13 @@ function AppsPanel() {
 
 /* ── Main column: the deal, step by step ───────────────────────────────── */
 
-function NewDeal({ settings, onDone }) {
+const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '' }
+
+function NewDeal({ settings, onDone, profile }) {
   const toast = useToast()
-  const [form, setForm] = useState({ company: '', email: '', name: '', offer: 'retainer', fee: '', extra: '' })
+  const [form, setForm] = useState(BLANK)
+  const [templates, setTemplates] = useState([])
+  const [signers, setSigners] = useState([])
   const [contract, setContract] = useState(null)
   const [channel, setChannel] = useState(null)
   const [sent, setSent] = useState(null)
@@ -162,16 +166,45 @@ function NewDeal({ settings, onDone }) {
   const [confirmSend, setConfirmSend] = useState(false)
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
 
-  const trialReady = !!(settings.template_trial || '').trim()
+  // The account's PandaDoc templates and the people who can sign for OPT.
+  useEffect(() => {
+    callCloserHub('templates').then(r => setTemplates(r.templates || [])).catch(() => setTemplates([]))
+    supabase.from('team_members').select('id, name, email, role, is_active').eq('role', 'closer').order('name')
+      .then(({ data }) => {
+        const list = (data || []).filter(m => m.email)
+        if (profile?.email && !list.some(m => (m.email || '').toLowerCase() === profile.email.toLowerCase())) {
+          list.unshift({ id: 'me', name: profile.name || profile.email, email: profile.email, role: 'admin', is_active: true })
+        }
+        setSigners(list)
+      })
+  }, [profile?.email])  // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Defaults: the signer is whoever is logged in, the template follows the deal type.
+  useEffect(() => {
+    if (!form.signer && signers.length) {
+      const me = signers.find(m => (m.email || '').toLowerCase() === (profile?.email || '').toLowerCase())
+      setForm(f => ({ ...f, signer: (me || signers[0]).email }))
+    }
+  }, [signers, profile?.email])  // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    setForm(f => ({ ...f, template: settings[`template_${f.offer}`] || '', fee: '' }))
+  }, [form.offer, settings])
+
   const fee = form.fee || settings[`fee_${form.offer}`] || ''
-  const standard = settings[`conditions_${form.offer}`] || ''
+  const standard = (settings[`conditions_${form.offer}`] || '').trim()
   const ready = form.company.trim().length > 0 && form.email.includes('@')
   const dim = ready ? {} : { opacity: .55, pointerEvents: 'none' }
+  const signer = signers.find(m => m.email === form.signer)
+  const templateName = templates.find(t => t.id === form.template)?.name
 
   const draft = async () => {
+    if (!form.template) return toast.error('Pick a contract template first.')
     setBusy('contract')
     try {
-      const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, fee, extra_conditions: form.extra })
+      const r = await callCloserHub('create_contract', {
+        company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
+        fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '',
+      })
       setContract(r); setSent(null); setConfirmSend(false)
       toast.success('Drafted in PandaDoc.')
       onDone?.()
@@ -195,28 +228,32 @@ function NewDeal({ settings, onDone }) {
     try {
       const r = await callCloserHub('make_channel', { company: form.company, email: form.email, prospect_name: form.name })
       setChannel(r)
-      toast.success(`#${r.channel?.name} ${r.channel?.created ? 'created' : 'was already there'}.`)
+      toast.success('Channels ready.')
       onDone?.()
     } catch (e) { toast.error(e.message); setChannel({ error: e.message, ...(e.data || {}) }) }
     finally { setBusy('') }
   }
 
-  const startOver = () => { setForm({ company: '', email: '', name: '', offer: 'retainer', fee: '', extra: '' }); setContract(null); setChannel(null); setSent(null); setConfirmSend(false) }
+  const reset = () => { setForm({ ...BLANK, signer: form.signer, template: settings.template_retainer || '' }); setContract(null); setChannel(null); setSent(null); setConfirmSend(false); setBusy('') }
   const p = channel?.prospect
+  const ch = channel?.channels
 
   return (
     <div className="grid gap-4">
       {/* 1. who */}
       <div className="tile" style={{ padding: '22px 24px' }}>
-        <StepHead n={1} title="Who" note="Company and the client's email. The rest fills itself in." />
+        <div className="flex items-start justify-between gap-3">
+          <StepHead n={1} title="Who" note="Company, the client's email, and whether this is a trial or a retainer." />
+          {(form.company || contract || channel) && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={reset}>Reset</button>}
+        </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <Field label="Company"><input value={form.company} onChange={set('company')} placeholder="Kings Roofing LLC" /></Field>
           <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} placeholder="owner@kingsroofing.com" /></Field>
           <Field label="Client name" hint="Optional. They can type it when signing."><input value={form.name} onChange={set('name')} placeholder="Jane Smith" /></Field>
-          <Field label="Agreement">
-            <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value, fee: '' }))}>
-              <option value="retainer">Retainer{settings.fee_retainer ? `, $${settings.fee_retainer} a month` : ''}</option>
-              <option value="trial" disabled={!trialReady}>{trialReady ? `Trial, $${settings.fee_trial}` : 'Trial (no template set yet)'}</option>
+          <Field label="Deal type">
+            <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value }))}>
+              <option value="trial">Trial</option>
+              <option value="retainer">Retainer</option>
             </select>
           </Field>
         </div>
@@ -224,14 +261,27 @@ function NewDeal({ settings, onDone }) {
 
       {/* 2. contract */}
       <div className="tile" style={{ padding: '22px 24px', ...dim }}>
-        <StepHead n={2} title="Contract" note="Drafts it in PandaDoc with the standard conditions. Sending is a separate click, so you can look it over first." />
+        <StepHead n={2} title="Contract" note="Pick the template and who signs for OPT. Drafting is private; sending is a separate click." />
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Contract template" hint={templates.length ? '' : 'Loading the list from PandaDoc.'}>
+            <select value={form.template} onChange={set('template')}>
+              <option value="">Pick one</option>
+              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </Field>
+          <Field label="Signing for OPT">
+            <select value={form.signer} onChange={set('signer')}>
+              {signers.map(m => <option key={m.id} value={m.email}>{m.name}{m.is_active === false ? ' (inactive)' : ''}</option>)}
+            </select>
+          </Field>
           <Field label="Monthly fee" hint="Change only with sign-off."><input inputMode="numeric" value={fee} onChange={set('fee')} /></Field>
-          <Field label="Extra for this deal" hint="Optional. Goes under the standard conditions."><input value={form.extra} onChange={set('extra')} /></Field>
-          <div className="sm:col-span-2">
-            <span className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Standard conditions</span>
-            <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'pre-wrap' }}>{standard || 'None set for this agreement.'}</p>
-          </div>
+          <Field label="Extra details" hint="Optional. Only goes into the contract if you write something."><input value={form.extra} onChange={set('extra')} placeholder="Anything extra on this deal" /></Field>
+          {standard && (
+            <div className="sm:col-span-2">
+              <span className="eyebrow" style={{ display: 'block', marginBottom: 6 }}>Standard conditions (set by admin)</span>
+              <p style={{ margin: 0, fontSize: 12.5, color: 'var(--ink-3)', whiteSpace: 'pre-wrap' }}>{standard}</p>
+            </div>
+          )}
         </div>
         <div className="flex items-center gap-3 mt-5 flex-wrap">
           <button type="button" className="editorial-btn-primary" onClick={draft} disabled={busy === 'contract'}>{busy === 'contract' ? 'Drafting' : contract?.doc_id ? 'Draft again' : 'Draft the contract'}</button>
@@ -247,25 +297,29 @@ function NewDeal({ settings, onDone }) {
         {contract?.error && <Result tone="bad">{contract.error}</Result>}
         {contract?.doc_id && (
           <Result>
-            <b>{contract.name}</b> is drafted{sent ? ' and sent' : ''}. <a href={contract.url} target="_blank" rel="noopener">Open in PandaDoc <ExternalLink size={ICON.sm} style={{ display: 'inline', verticalAlign: '-2px' }} /></a>
+            <b>{contract.name}</b> is drafted{sent ? ' and sent' : ''} from {contract.template_name || templateName || 'the template'}{contract.opt_signer_name ? `, ${contract.opt_signer_name} signing for OPT` : ''}. <a href={contract.url} target="_blank" rel="noopener">Open in PandaDoc <ExternalLink size={ICON.sm} style={{ display: 'inline', verticalAlign: '-2px' }} /></a>
             {!contract.renamed && !sent && <span style={{ display: 'block', color: 'var(--house-warn)' }}>Check the name for a &quot;[DEV]&quot; prefix before sending.</span>}
           </Result>
         )}
       </div>
 
-      {/* 3. channel */}
+      {/* 3. channels */}
       <div className="tile" style={{ padding: '22px 24px', ...dim }}>
-        <StepHead n={3} title="Channel" note="Makes client-<business> in Slack, invites the account-management team and you, and invites the client by email." />
-        <button type="button" className="editorial-btn-primary" onClick={make} disabled={busy === 'channel'}>{busy === 'channel' ? 'Making the channel' : 'Make the channel'}</button>
+        <StepHead n={3} title="Channels" note="Makes both Slack channels: client-<business> for the team, and opt-<business> for the team and the client. The client is invited to opt- by email." />
+        <button type="button" className="editorial-btn-primary" onClick={make} disabled={busy === 'channel'}>{busy === 'channel' ? 'Making the channels' : 'Make the channels'}</button>
         {channel?.error && <Result tone="bad">Could not make the channel: {channel.error}</Result>}
-        {channel?.ok && (
+        {channel?.ok && ch && (
           <Result>
-            <b>#{channel.channel?.name}</b> {channel.channel?.created ? 'created' : 'already existed, reused'}. Invited {channel.invited?.length || 0} team member{(channel.invited?.length || 0) === 1 ? '' : 's'}{channel.closer_invited ? ', including you' : ''}.
-            {channel.channel?.id && <> <a href={`https://slack.com/app_redirect?channel=${channel.channel.id}`} target="_blank" rel="noopener">Open in Slack</a>.</>}
+            {['internal', 'external'].map(k => (
+              <div key={k}>
+                <b>#{ch[k]?.name}</b> {ch[k]?.created ? 'created' : 'already existed, reused'}, {ch[k]?.invited?.length || 0} team member{(ch[k]?.invited?.length || 0) === 1 ? '' : 's'}{k === 'internal' && channel.closer_invited ? ' including you' : ''}.
+                {ch[k]?.id && <> <a href={`https://slack.com/app_redirect?channel=${ch[k].id}`} target="_blank" rel="noopener">Open</a></>}
+              </div>
+            ))}
             <div style={{ marginTop: 6 }}>
               {p?.skipped && 'No client email, so nobody outside the team was invited.'}
-              {p?.ok && <>Invite emailed to <b>{p.email}</b>.</>}
-              {p && !p.ok && !p.skipped && <>Slack could not invite <b>{p.email}</b> by itself. In Slack, open the channel, <i>Add people</i>, paste the email, pick <i>guest</i>.</>}
+              {p?.ok && <>Invite to #{p.channel} emailed to <b>{p.email}</b>.</>}
+              {p && !p.ok && !p.skipped && <>Slack could not invite <b>{p.email}</b> by itself. In Slack, open <b>#{p.channel}</b>, <i>Add people</i>, paste the email, pick <i>guest</i>.</>}
             </div>
           </Result>
         )}
@@ -278,7 +332,7 @@ function NewDeal({ settings, onDone }) {
           <li>Move the card in <a href="https://app.gohighlevel.com/" target="_blank" rel="noopener">GoHighLevel</a> to Closed or New Map Closes. That posts the close and starts onboarding.</li>
           <li>Log the call in <Link to="/sales/eod">End of Day</Link>.</li>
         </ol>
-        <div className="mt-5"><button type="button" className="editorial-btn-ghost" onClick={startOver}>Start another deal</button></div>
+        <div className="mt-5"><button type="button" className="editorial-btn-ghost" onClick={reset}>Start another deal</button></div>
       </div>
     </div>
   )
@@ -331,10 +385,10 @@ function SettingsSection({ settings, onSaved }) {
       <summary style={{ cursor: 'pointer', listStyle: 'none' }} className="flex items-center gap-2">
         <span className="eyebrow" style={{ margin: 0 }}>Hub settings</span><span className="pill pill-soft">Admin</span>
       </summary>
-      <p style={{ margin: '12px 0 14px', fontSize: 13, color: 'var(--ink-3)' }}>The conditions go into a legal document on every contract. Read them before you rely on them.</p>
+      <p style={{ margin: '12px 0 14px', fontSize: 13, color: 'var(--ink-3)' }}>Defaults for step 2. Standard conditions are off unless you write some here.</p>
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        <Field label="Standard conditions: retainer" span><textarea rows={4} value={draft.conditions_retainer || ''} onChange={upd('conditions_retainer')} /></Field>
-        <Field label="Standard conditions: trial" span><textarea rows={3} value={draft.conditions_trial || ''} onChange={upd('conditions_trial')} /></Field>
+        <Field label="Standard conditions: retainer" hint="Leave blank to add none. Anything here goes on every retainer contract." span><textarea rows={4} value={draft.conditions_retainer || ''} onChange={upd('conditions_retainer')} /></Field>
+        <Field label="Standard conditions: trial" hint="Leave blank to add none." span><textarea rows={3} value={draft.conditions_trial || ''} onChange={upd('conditions_trial')} /></Field>
         {SETTING_FIELDS.map(([key, label, hint]) => <Field key={key} label={label} hint={hint}><input value={draft[key] || ''} onChange={upd(key)} /></Field>)}
       </div>
       <div className="mt-5 mb-2"><button type="button" className="editorial-btn-primary" onClick={save} disabled={busy}>{busy ? 'Saving' : 'Save settings'}</button></div>
@@ -345,7 +399,7 @@ function SettingsSection({ settings, onSaved }) {
 /* ── Page ──────────────────────────────────────────────────────────────── */
 
 export default function CloserHub() {
-  const { isAdmin } = useAuth()
+  const { isAdmin, profile } = useAuth()
   const toast = useToast()
   const [settings, setSettings] = useState({})
   const [refreshKey, setRefreshKey] = useState(0)
@@ -365,7 +419,7 @@ export default function CloserHub() {
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 items-start">
         <div className="xl:col-span-2 grid gap-4">
-          <NewDeal settings={settings} onDone={bump} />
+          <NewDeal settings={settings} onDone={bump} profile={profile} />
           <Recent refreshKey={refreshKey} />
           {isAdmin && <SettingsSection settings={settings} onSaved={setSettings} />}
         </div>
