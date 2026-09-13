@@ -115,8 +115,14 @@ async function templates(admin: any) {
   // The API lists archived ones too, so the name is the switch.
   const st = await settings(admin)
   const allow = new Set((st.template_active_ids || '').split(',').map((x) => x.trim()).filter(Boolean))
-  const active = all.filter((x: any) => /ACTIVE/i.test(x.name) || allow.has(x.id))
-  return { status: 200, body: { templates: active.length ? active : all, all_count: all.length } }
+  const active = all.filter((x: any) => /\bACTIVE\b/i.test(x.name) || allow.has(x.id))
+  // Agreements kept as our own tagged Word files (the Australian one) show
+  // in the picker too; their id is "file:<path in the closer-hub bucket>".
+  const files = Object.entries(st).filter(([k, v]) => k.startsWith('template_') && String(v || '').startsWith('file:'))
+    .map(([k, v]) => ({ id: String(v), name: String(st[`${k}_label`] || (k.includes('_au') ? 'ACTIVE Retainer AU - Local SEO Client Agreement (AUD)' : String(v).slice(5))) }))
+  const seen = new Set<string>()
+  const list = [...(active.length ? active : all), ...files].filter((x: any) => (seen.has(x.id) ? false : (seen.add(x.id), true)))
+  return { status: 200, body: { templates: list, all_count: all.length } }
 }
 
 // Which role signs for OPT and which for the client, and which merge fields
@@ -131,6 +137,34 @@ async function templateShape(templateId: string) {
   const optRole = roles.find((r) => r !== clientRole) || ''
   const fields = new Set<string>((d.fields || []).map((f: any) => f.merge_field || f.name).filter(Boolean))
   return { roles, clientRole, optRole, fields, name: d.name || '' }
+}
+
+// Upload one of our tagged Word files to PandaDoc as a new document. The
+// file lives in the private closer-hub bucket on this project.
+async function createFromFile(path: string, data: any) {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL')!
+  const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+  const f = await fetch(`${supabaseUrl}/storage/v1/object/closer-hub/${path}`, { headers: { Authorization: `Bearer ${serviceKey}`, apikey: serviceKey } })
+  if (!f.ok) throw new Error(`agreement file ${path} not found in storage (${f.status})`)
+  const blob = await f.blob()
+  const form = new FormData()
+  form.append('file', blob, path.split('/').pop() || 'agreement.docx')
+  form.append('data', JSON.stringify(data))
+  const key = Deno.env.get('PANDADOC_API_KEY') || ''
+  const r = await fetch(`${PANDADOC}/documents`, { method: 'POST', headers: { Authorization: `API-Key ${key}` }, body: form })
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) throw new Error(`PandaDoc upload ${r.status}: ${(j.detail || JSON.stringify(j)).toString().slice(0, 300)}`)
+  const id = j.id
+  let status = j.status || 'document.uploaded'
+  for (let i = 0; i < 12 && status === 'document.uploaded'; i++) {
+    await new Promise((res) => setTimeout(res, 5000))
+    try { status = (await pd('GET', `/documents/${id}`)).status || status } catch { /* keep polling */ }
+  }
+  let renamed = false
+  if (status !== 'document.uploaded') {
+    try { await pd('PATCH', `/documents/${id}`, { name: data.name }); renamed = true } catch { renamed = false }
+  }
+  return { id, status, renamed, fields: data.fields }
 }
 
 async function createContract(admin: any, who: Caller, body: any) {
@@ -157,6 +191,28 @@ async function createContract(admin: any, who: Caller, body: any) {
   const [cFirst, cLast] = splitName(body.signer_name || '', 'Client')
   const docName = `${company} - Opt Digital Client Agreement`
 
+  // A file-based agreement: our own tagged Word file, uploaded to PandaDoc
+  // per deal with the fields filled. The tags carry the roles (Closer /
+  // Client), so no template lookup is needed.
+  if (template.startsWith('file:')) {
+    if (body.dry_run) return { status: 200, body: { dry_run: true, offer, template, template_name: 'file upload', roles: ['Closer', 'Client'],
+      payload: { name: docName, recipients: [{ email: optEmail, role: 'Closer' }, { email, role: 'Client' }], fields: { ClientName: company, MonthlyFee: fee, ExecutionDate: 'today', OptRepName: optRep, ...(conditions ? { SpecialConditions: conditions } : {}) } } } }
+    const out = await createFromFile(template.slice(5), {
+      name: docName,
+      recipients: [
+        { email: optEmail, first_name: optFirst, last_name: optLast, role: 'Closer' },
+        { email, first_name: cFirst, last_name: cLast, role: 'Client' },
+      ],
+      fields: { ClientName: { value: company }, MonthlyFee: { value: fee }, ExecutionDate: { value: new Date().toISOString().slice(0, 10) },
+        OptRepName: { value: optRep }, ...(conditions ? { SpecialConditions: { value: conditions } } : {}) },
+      parse_form_fields: false,
+    })
+    const result = { ok: true, doc_id: out.id, status: out.status, renamed: out.renamed, offer, fee, conditions, name: docName, template,
+      template_name: 'Local SEO Client Agreement (AUD)', fields_sent: Object.keys(out.fields || {}),
+      url: `https://app.pandadoc.com/a/#/documents/${out.id}`, client_email: email, opt_signer: optEmail, opt_signer_name: optRep }
+    await log(admin, who, 'create_contract', body, true, result)
+    return { status: 200, body: result }
+  }
   const shape = await templateShape(template)
   const wanted: Record<string, { value: string }> = {
     ClientName: { value: company },
