@@ -156,7 +156,9 @@ async function createFromFile(path: string, data: any) {
   if (!r.ok) throw new Error(`PandaDoc upload ${r.status}: ${(j.detail || JSON.stringify(j)).toString().slice(0, 300)}`)
   const id = j.id
   let status = j.status || 'document.uploaded'
-  for (let i = 0; i < 12 && status === 'document.uploaded'; i++) {
+  // A file upload takes PandaDoc longer to parse than a template does; wait up
+  // to about 100 seconds, then hand back whatever state it is in.
+  for (let i = 0; i < 20 && status === 'document.uploaded'; i++) {
     await new Promise((res) => setTimeout(res, 5000))
     try { status = (await pd('GET', `/documents/${id}`)).status || status } catch { /* keep polling */ }
   }
