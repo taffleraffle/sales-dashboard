@@ -230,7 +230,25 @@ function ReferralCard({ item: r, onClose, copy }) {
     return () => { alive = false }
   }, [r])
   const cl = card?.client
-  const gmbs = card?.gmbs || []
+  // On record (the client dashboard) first, then the profiles the Google Maps
+  // scan found for the same site or phone (stored on the referral as gmbs).
+  // One row per profile, matched on the Google CID.
+  const cidOf = (u) => { try { return new URL(u).searchParams.get('cid') || '' } catch { return '' } }
+  const scanned = r.gmbs || []
+  const gmbs = (() => {
+    const out = (card?.gmbs || []).map(g => {
+      const hit = scanned.find(x => x.cid && x.cid === cidOf(g.url))
+      return { ...g, address: g.address || hit?.address, rating: hit?.rating, reviews: hit?.reviews, gone: hit?.live === false }
+    })
+    const have = new Set(out.map(g => cidOf(g.url)).filter(Boolean))
+    for (const x of scanned) {
+      if (x.cid && have.has(x.cid)) continue
+      if (!x.cid && out.some(g => g.name === x.name)) continue
+      out.push({ name: x.name, url: x.url, address: x.address, rating: x.rating, reviews: x.reviews, found: String(x.source || '').startsWith('found') })
+      if (x.cid) have.add(x.cid)
+    }
+    return out
+  })()
   const videos = (r.videos || []).filter(Boolean)
   const phone = cl?.phone || r.phone
   const email = cl?.email || r.email
@@ -277,13 +295,13 @@ function ReferralCard({ item: r, onClose, copy }) {
         </Section>
 
         <Section title={`Google Business Profiles${gmbs.length ? ` (${gmbs.length})` : ''}`}>
-          {gmbs.length === 0 && <Row first><GoogleMark /><span style={{ color: 'var(--ink-4)' }}>{cl ? 'None on record.' : 'Unknown until the client book answers.'}</span></Row>}
+          {gmbs.length === 0 && <Row first><GoogleMark /><span style={{ color: 'var(--ink-4)' }}>{card === undefined ? 'Loading.' : 'None on record or found on Google.'}</span></Row>}
           {gmbs.map((g, i) => (
             <Row key={g.url || g.name} first={i === 0}>
               <GoogleMark />
               <div className="min-w-0 flex-1">
                 <div style={{ fontWeight: 600 }} className="truncate">{g.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type].filter(Boolean).join(' · ')}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.rating ? `${g.rating} stars from ${g.reviews || 0} reviews` : g.reviews === 0 ? 'no reviews yet' : '', g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type, g.found ? 'found on Google, not on record' : '', g.gone ? 'not showing on Google at the last scan' : ''].filter(Boolean).join(' · ')}</div>
               </div>
               {g.status && <span className={`pill ${g.status === 'active' ? 'pill-up' : 'pill-soft'}`}>{g.status}</span>}
               {g.url && <a href={g.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Maps <ExternalLink size={ICON.sm} /></a>}
