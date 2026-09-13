@@ -236,17 +236,18 @@ function ReferralCard({ item: r, onClose, copy }) {
   // scan found for the same site or phone (stored on the referral as gmbs).
   // One row per profile, matched on the Google CID.
   const cidOf = (u) => { try { return new URL(u).searchParams.get('cid') || '' } catch { return '' } }
+  const localPhone = (ph) => { const d = String(ph || '').replace(/[^0-9+]/g, ''); return !d.startsWith('+') || d.startsWith(r.region === 'au' ? '+61' : r.region === 'nz' ? '+64' : '+1') }
   const scanned = r.gmbs || []
   const gmbs = (() => {
     const out = (card?.gmbs || []).map(g => {
       const hit = scanned.find(x => x.cid && x.cid === cidOf(g.url))
-      return { ...g, address: g.address || hit?.address, rating: hit?.rating, reviews: hit?.reviews, gone: hit?.live === false }
+      return { ...g, address: g.address || hit?.address, rating: hit?.rating, reviews: hit?.reviews, phone: hit?.phone, gone: hit?.live === false }
     })
     const have = new Set(out.map(g => cidOf(g.url)).filter(Boolean))
     for (const x of scanned) {
       if (x.cid && have.has(x.cid)) continue
       if (!x.cid && out.some(g => g.name === x.name)) continue
-      out.push({ name: x.name, url: x.url, address: x.address, rating: x.rating, reviews: x.reviews, found: String(x.source || '').startsWith('found') })
+      out.push({ name: x.name, url: x.url, address: x.address, rating: x.rating, reviews: x.reviews, phone: x.phone, found: String(x.source || '').startsWith('found') })
       if (x.cid) have.add(x.cid)
     }
     return out
@@ -306,6 +307,9 @@ function ReferralCard({ item: r, onClose, copy }) {
                 <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.rating ? `${g.rating} stars from ${g.reviews || 0} reviews` : g.reviews === 0 ? 'no reviews yet' : '', g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type, g.found ? 'found on Google, not on record' : '', g.gone ? 'not showing on Google at the last scan' : ''].filter(Boolean).join(' · ')}</div>
               </div>
               {g.status && <span className={`pill ${g.status === 'active' ? 'pill-up' : 'pill-soft'}`}>{g.status}</span>}
+              {g.phone && (localPhone(g.phone)
+                ? <a href={`tel:${g.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={small} title={`Call this listing: ${g.phone}`}><Phone size={ICON.sm} /> {g.phone}</a>
+                : <span style={{ fontSize: 12, color: 'var(--house-warn)' }} title="The number on this Google listing is not a local one. Fix it in the profile.">Listing phone is overseas: {g.phone}</span>)}
               {g.url && <a href={g.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Maps <ExternalLink size={ICON.sm} /></a>}
             </Row>
           ))}
