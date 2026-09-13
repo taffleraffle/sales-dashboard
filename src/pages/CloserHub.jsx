@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowUpRight, Eye, EyeOff, Copy, Check, ExternalLink } from 'lucide-react'
+import { ArrowUpRight, Eye, EyeOff, Copy, Check, ExternalLink, Phone, Mail, Globe, Video, FolderOpen, FileText, User } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../hooks/useToast'
@@ -238,8 +238,18 @@ function ReferralCard({ item: r, onClose, copy }) {
       {children}
     </div>
   )
-  const Row = ({ children, first }) => <div className="flex items-center gap-2 flex-wrap" style={{ padding: '8px 0', borderTop: first ? 0 : '1px solid var(--rule)', fontSize: 13 }}>{children}</div>
+  const Row = ({ children, first }) => <div className="flex items-center gap-3 flex-wrap" style={{ padding: '9px 0', borderTop: first ? 0 : '1px solid var(--rule)', fontSize: 13 }}>{children}</div>
   const small = { height: 28, fontSize: 12, padding: '0 10px' }
+  // A small icon badge at the start of each row, so the card reads at a glance.
+  const Icon = ({ children, tone }) => (
+    <span style={{ width: 28, height: 28, borderRadius: 8, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+      background: tone === 'accent' ? 'rgba(244,225,74,.55)' : '#fff', border: tone === 'accent' ? 0 : '1px solid var(--rule)', color: 'var(--ink-2)' }}>{children}</span>
+  )
+  const GoogleMark = () => (
+    <span style={{ width: 28, height: 28, borderRadius: 8, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', background: '#fff', border: '1px solid var(--rule)' }}>
+      <img src="https://www.google.com/s2/favicons?domain=business.google.com&sz=64" alt="" width={16} height={16} style={{ width: 16, height: 16, display: 'block' }} />
+    </span>
+  )
   return (
     <Modal open onClose={onClose} size="md" eyebrow="Referral" title={r.name}
       subtitle={[contact, cl?.city && cl?.state ? `${cl.city}, ${cl.state}` : r.location, cl?.account_manager ? `account manager ${cl.account_manager}` : null].filter(Boolean).join(' · ')}
@@ -250,24 +260,23 @@ function ReferralCard({ item: r, onClose, copy }) {
         {card && !cl && <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--house-warn)' }}>Not found in the client book under this name; showing what the referral holds.</p>}
 
         <Section title="Contact">
-          <Row first>
-            <span style={{ fontWeight: 600, flex: 1 }}>{contact || 'No contact name'}</span>
-          </Row>
-          {phone && <Row><span style={{ flex: 1 }}>{phone}</span><a href={`tel:${phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-primary" style={small}>Call</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(phone)}><Copy size={ICON.sm} /></button></Row>}
-          {email && <Row><span style={{ flex: 1 }} className="truncate">{email}</span><a href={`mailto:${email}`} className="editorial-btn-ghost" style={small}>Email</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(email)}><Copy size={ICON.sm} /></button></Row>}
-          {!phone && !email && <Row><span style={{ color: 'var(--ink-4)' }}>No phone or email on record.</span></Row>}
+          <Row first><Icon tone="accent"><User size={14} /></Icon><span style={{ fontWeight: 600, flex: 1 }}>{contact || 'No contact name'}</span></Row>
+          {phone && <Row><Icon><Phone size={14} /></Icon><span style={{ flex: 1 }}>{phone}</span><a href={`tel:${phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-primary" style={small}><Phone size={ICON.sm} /> Call</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(phone)} title="Copy"><Copy size={ICON.sm} /></button></Row>}
+          {email && <Row><Icon><Mail size={14} /></Icon><span style={{ flex: 1 }} className="truncate">{email}</span><a href={`mailto:${email}`} className="editorial-btn-ghost" style={small}><Mail size={ICON.sm} /> Email</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(email)} title="Copy"><Copy size={ICON.sm} /></button></Row>}
+          {!phone && !email && <Row><Icon><Phone size={14} /></Icon><span style={{ color: 'var(--ink-4)' }}>No phone or email on record.</span></Row>}
         </Section>
 
         <Section title="Website">
           {website
-            ? <Row first><span style={{ flex: 1 }} className="truncate">{website.replace(/^https?:\/\//, '')}</span><a href={website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(website)}><Copy size={ICON.sm} /></button></Row>
-            : <Row first><span style={{ color: 'var(--ink-4)' }}>No website on record.</span></Row>}
+            ? <Row first><Icon><Globe size={14} /></Icon><span style={{ flex: 1 }} className="truncate">{website.replace(/^https?:\/\//, '')}</span><a href={website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(website)} title="Copy"><Copy size={ICON.sm} /></button></Row>
+            : <Row first><Icon><Globe size={14} /></Icon><span style={{ color: 'var(--ink-4)' }}>No website on record.</span></Row>}
         </Section>
 
         <Section title={`Google Business Profiles${gmbs.length ? ` (${gmbs.length})` : ''}`}>
-          {gmbs.length === 0 && <Row first><span style={{ color: 'var(--ink-4)' }}>{cl ? 'None on record.' : 'Unknown until the client book answers.'}</span></Row>}
+          {gmbs.length === 0 && <Row first><GoogleMark /><span style={{ color: 'var(--ink-4)' }}>{cl ? 'None on record.' : 'Unknown until the client book answers.'}</span></Row>}
           {gmbs.map((g, i) => (
             <Row key={g.url || g.name} first={i === 0}>
+              <GoogleMark />
               <div className="min-w-0 flex-1">
                 <div style={{ fontWeight: 600 }} className="truncate">{g.name}</div>
                 <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type].filter(Boolean).join(' · ')}</div>
@@ -279,16 +288,16 @@ function ReferralCard({ item: r, onClose, copy }) {
         </Section>
 
         <Section title={`Videos${videos.length ? ` (${videos.length})` : ''}`}>
-          {videos.length === 0 && <Row first><span style={{ color: 'var(--ink-4)' }}>No videos added yet. An admin adds links on the referral.</span></Row>}
+          {videos.length === 0 && <Row first><Icon><Video size={14} /></Icon><span style={{ color: 'var(--ink-4)' }}>No videos added yet. An admin adds links on the referral.</span></Row>}
           {videos.map((v, i) => (
-            <Row key={v} first={i === 0}><span style={{ flex: 1 }} className="truncate">{v.replace(/^https?:\/\//, '')}</span><a href={v} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Watch <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v)}><Copy size={ICON.sm} /></button></Row>
+            <Row key={v} first={i === 0}><Icon><Video size={14} /></Icon><span style={{ flex: 1 }} className="truncate">{v.replace(/^https?:\/\//, '')}</span><a href={v} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Watch <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v)}><Copy size={ICON.sm} /></button></Row>
           ))}
         </Section>
 
         {(r.link || cl?.drive_folder_url) && (
           <Section title="More">
-            {r.link && <Row first><span style={{ flex: 1 }}>Case study or review</span><a href={r.link} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
-            {cl?.drive_folder_url && <Row first={!r.link}><span style={{ flex: 1 }}>Drive folder</span><a href={cl.drive_folder_url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
+            {r.link && <Row first><Icon><FileText size={14} /></Icon><span style={{ flex: 1 }}>Case study or review</span><a href={r.link} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
+            {cl?.drive_folder_url && <Row first={!r.link}><Icon><FolderOpen size={14} /></Icon><span style={{ flex: 1 }}>Drive folder</span><a href={cl.drive_folder_url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
           </Section>
         )}
       </div>
@@ -296,12 +305,17 @@ function ReferralCard({ item: r, onClose, copy }) {
   )
 }
 
-function CaseStudies({ settings, copy, isAdmin, onSaved }) {
+function CaseStudies({ settings, copy, isAdmin, onSaved, dealRegion }) {
   const toast = useToast()
   const list = (() => { try { const v = JSON.parse(settings.case_studies || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } })()
+  // USA / AU / NZ, like the payment links: the open deal's region to start, a click wins.
+  const [region, setRegionState] = useState(() => { try { return dealRegion || localStorage.getItem('closer-hub-ref-region') || 'us' } catch { return dealRegion || 'us' } })
+  useEffect(() => { if (dealRegion) setRegionState(dealRegion) }, [dealRegion])
+  const setRegion = (r) => { setRegionState(r); try { localStorage.setItem('closer-hub-ref-region', r) } catch { /* fine */ } }
+  const shown = list.map((c, i) => ({ ...c, _i: i })).filter(c => (c.region || 'us') === region)
   const [adding, setAdding] = useState(false)
   const [open, setOpen] = useState(null)
-  const [draft, setDraft] = useState({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '' })
+  const [draft, setDraft] = useState({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '', region: 'us' })
   const persist = async (next) => {
     try { await saveCloserHubSettings({ case_studies: JSON.stringify(next) }); onSaved({ ...settings, case_studies: JSON.stringify(next) }); toast.success('Saved.') }
     catch (e) { toast.error(e.message) }
@@ -310,41 +324,48 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
     if (!draft.name.trim()) return toast.error('A name at least.')
     const videos = String(draft.videos || '').split(/\n|,/).map(x => x.trim()).filter(Boolean)
     await persist([...list, { ...draft, videos, website: draft.website && !/^https?:/.test(draft.website) ? `https://${draft.website}` : draft.website }])
-    setDraft({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '' }); setAdding(false)
+    setDraft({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '', region }); setAdding(false)
   }
   const remove = (i) => persist(list.filter((_, k) => k !== i))
   return (
     <div>
-      {isAdmin && (
-        <div className="flex items-center justify-end gap-2 mb-2">
-          <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setAdding(v => !v)}>{adding ? 'Cancel' : 'Add a referral'}</button>
+      <div className="flex items-center justify-between gap-2 mb-2">
+        <div className="flex gap-1">
+          {REGIONS.map(([v, l]) => (
+            <button key={v} type="button" className={region === v ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setRegion(v)}>{l}</button>
+          ))}
         </div>
-      )}
-      {list.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>No referrals yet.</div>}
-      {list.map((c, i) => (
-        <div key={c.name + i} style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
-          <div className="flex items-center gap-3">
-            <button type="button" className="house-plain flex items-center gap-3 min-w-0 flex-1" style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer', color: 'inherit' }} onClick={() => setOpen(c)} title="Open their card">
-            <SiteLogo website={c.website} name={c.name} />
-            <div className="min-w-0 flex-1">
-              <div style={{ fontWeight: 600 }} className="truncate">{c.name} <ArrowUpRight size={ICON.sm} style={{ display: 'inline', verticalAlign: '-2px', color: 'var(--ink-4)' }} /></div>
-              {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
+        {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} onClick={() => setAdding(v => !v)}>{adding ? 'Cancel' : 'Add a referral'}</button>}
+      </div>
+      {shown.length === 0 && !adding && <div style={{ fontSize: 12.5, color: 'var(--ink-4)', padding: '6px 0' }}>No {REGIONS.find(([v]) => v === region)?.[1]} referrals yet.</div>}
+      {shown.map((c, i) => (
+        <div key={c.name + c._i} className="flex items-start gap-2" style={{ borderTop: i ? '1px solid var(--rule)' : 0 }}>
+          {/* The whole row opens the card (Ben, 13 Sep 2026: "hover over this whole thing"). */}
+          <button type="button" className="house-plain tile-hover min-w-0 flex-1" style={{ background: 'none', border: 0, padding: '10px 8px', margin: '2px -8px', borderRadius: 12, textAlign: 'left', cursor: 'pointer', color: 'inherit', fontSize: 13 }} onClick={() => setOpen(c)} title="Open their card">
+            <div className="flex items-center gap-3">
+              <SiteLogo website={c.website} name={c.name} />
+              <div className="min-w-0 flex-1">
+                <div style={{ fontWeight: 600 }} className="truncate">{c.name}</div>
+                {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
+              </div>
+              <ArrowUpRight size={ICON.md} style={{ color: 'var(--ink-4)', flex: 'none' }} />
             </div>
-            </button>
-            {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 24, fontSize: 11, padding: '0 7px' }} onClick={() => remove(i)} title="Remove">×</button>}
-          </div>
-          {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, paddingLeft: 42 }}>{c.note}</div>}
-          <div className="flex gap-1 flex-wrap mt-1" style={{ paddingLeft: 42 }}>
-            {c.phone && <a href={`tel:${c.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }} title="Call">{c.phone}</a>}
-            {c.phone && <button type="button" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 8px' }} onClick={() => copy(c.phone)} title="Copy the number"><Copy size={ICON.sm} /></button>}
-            {c.website && <a href={c.website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }}>Website <ExternalLink size={ICON.sm} /></a>}
-            {c.link && <a href={c.link} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 26, fontSize: 11.5, padding: '0 9px' }}>Case study <ExternalLink size={ICON.sm} /></a>}
-          </div>
+            {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, paddingLeft: 42 }}>{c.note}</div>}
+            <div className="flex gap-2 flex-wrap mt-1" style={{ paddingLeft: 42, fontSize: 12, color: 'var(--ink-4)' }}>
+              {c.phone && <span className="inline-flex items-center gap-1"><Phone size={ICON.sm} /> {c.phone}</span>}
+              {c.website && <span className="inline-flex items-center gap-1"><Globe size={ICON.sm} /> {c.website.replace(/^https?:\/\//, '').replace(/\/$/, '')}</span>}
+              {(c.videos || []).length > 0 && <span className="inline-flex items-center gap-1"><Video size={ICON.sm} /> {c.videos.length}</span>}
+            </div>
+          </button>
+          {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 24, fontSize: 11, padding: '0 7px', marginTop: 10 }} onClick={() => remove(c._i)} title="Remove">×</button>}
         </div>
       ))}
       {open && <ReferralCard item={open} onClose={() => setOpen(null)} copy={copy} />}
       {adding && (
         <div className="grid gap-2 mt-2" style={{ paddingTop: 10, borderTop: '1px solid var(--rule)' }}>
+          <select value={draft.region} onChange={(e) => setDraft(d => ({ ...d, region: e.target.value }))} style={{ height: 34, fontSize: 13 }}>
+            {REGIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+          </select>
           {[['name', 'Business'], ['contact', 'Contact name'], ['phone', 'Phone'], ['website', 'Website'], ['link', 'Case study or review link'], ['note', 'One line about them']].map(([k, l]) => (
             <input key={k} value={draft[k]} onChange={(e) => setDraft(d => ({ ...d, [k]: e.target.value }))} placeholder={l} style={{ height: 34, fontSize: 13 }} />
           ))}
@@ -376,7 +397,7 @@ function SidePanel({ settings, copy, isAdmin, onSaved, dealRegion }) {
       </div>
       {tab === 'apps' && <AppsPanel />}
       {tab === 'pay' && <PaymentLinks settings={settings} copy={copy} dealRegion={dealRegion} />}
-      {tab === 'refs' && <CaseStudies settings={settings} copy={copy} isAdmin={isAdmin} onSaved={onSaved} />}
+      {tab === 'refs' && <CaseStudies settings={settings} copy={copy} isAdmin={isAdmin} onSaved={onSaved} dealRegion={dealRegion} />}
     </div>
   )
 }
