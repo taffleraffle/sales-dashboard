@@ -122,7 +122,22 @@ async function templates(admin: any) {
     .map(([k, v]) => ({ id: String(v), name: String(st[`${k}_label`] || (k.includes('_au') ? 'ACTIVE Retainer AU - Local SEO Client Agreement (AUD)' : String(v).slice(5))) }))
   const seen = new Set<string>()
   const list = [...(active.length ? active : all), ...files].filter((x: any) => (seen.has(x.id) ? false : (seen.add(x.id), true)))
-  return { status: 200, body: { templates: list, all_count: all.length } }
+  // Ben, 14 Sep 2026: "how do I know which contract is which?" Each entry
+  // says who signs, whether a signature box is missing, and links to PandaDoc.
+  const detailed = await Promise.all(list.map(async (x: any) => {
+    if (String(x.id).startsWith('file:')) return { ...x, kind: 'file', roles: ['Closer', 'Client'], signatures: { Closer: 1, Client: 1 }, missing: [], url: null }
+    try {
+      const sh = await templateShape(x.id)
+      const missing = [
+        ...(sh.clientRole && !sh.signatures[sh.clientRole] ? ['the client'] : []),
+        ...(sh.optRole && !sh.signatures[sh.optRole] ? ['OPT'] : []),
+      ]
+      return { ...x, kind: 'pandadoc', roles: sh.roles, signatures: sh.signatures, missing, url: `https://app.pandadoc.com/a/#/templates/${x.id}` }
+    } catch {
+      return { ...x, kind: 'pandadoc', roles: [], signatures: {}, missing: [], url: `https://app.pandadoc.com/a/#/templates/${x.id}` }
+    }
+  }))
+  return { status: 200, body: { templates: detailed, all_count: all.length } }
 }
 
 // Which role signs for OPT and which for the client, and which merge fields
@@ -189,7 +204,8 @@ async function createContract(admin: any, who: Caller, body: any) {
   const company = (body.company || '').trim()
   const email = (body.email || '').trim().toLowerCase()
   if (!company || !email || !email.includes('@')) return { status: 400, body: { error: 'company and a valid client email are required' } }
-  const fee = String(body.fee || s[`fee_${offer}`] || '').replace(/[^0-9.]/g, '')
+  // The fee left blank falls back by region: fee_retainer_au for an Australian retainer, else fee_retainer.
+  const fee = String(body.fee || (region === 'au' ? s[`fee_${offer}_au`] : '') || s[`fee_${offer}`] || '').replace(/[^0-9.]/g, '')
 
   // Conditions go in only when someone wrote some. Ben, 12 Sep 2026: "It's
   // adding special conditions when there aren't any special conditions."
