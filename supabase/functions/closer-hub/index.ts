@@ -136,7 +136,8 @@ async function templateShape(templateId: string) {
 async function createContract(admin: any, who: Caller, body: any) {
   const s = await settings(admin)
   const offer = body.offer === 'trial' ? 'trial' : 'retainer'
-  const template = (body.template || s[`template_${offer}`] || '').trim()
+  const region = (body.region || '').toLowerCase()
+  const template = (body.template || (region === 'au' ? s[`template_${offer}_au`] : '') || s[`template_${offer}`] || '').trim()
   if (!template) return { status: 400, body: { error: `Pick a contract template. No default is set for the ${offer} agreement.` } }
   const company = (body.company || '').trim()
   const email = (body.email || '').trim().toLowerCase()
@@ -468,8 +469,19 @@ serve(async (req) => {
       case 'whoami': out = { status: 200, body: { name: who.name, email: who.email, isAdmin: who.isAdmin } }; break
       default: out = { status: 400, body: { error: `unknown action "${body.action || ''}"` } }
     }
+    // A failed action is logged too, so the error a closer saw can be found
+    // afterwards (13 Sep 2026: "it was giving me a PandaDoc API error", and
+    // the log held only successes).
+    if (out.status >= 400 && ['create_contract', 'send_contract', 'make_channel', 'stripe_link', 'ghl_move'].includes(body.action)) {
+      await log(admin, who, body.action, body, false, { status: out.status, ...out.body })
+    }
     return reply(out.status, out.body)
   } catch (e) {
-    return reply(500, { error: String((e as Error)?.message || e) })
+    const msg = String((e as Error)?.message || e)
+    try {
+      const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+      await admin.from('closer_hub_actions').insert({ action: 'error', ok: false, result: { error: msg } })
+    } catch { /* the audit row must never mask the error */ }
+    return reply(500, { error: msg })
   }
 })
