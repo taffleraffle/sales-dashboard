@@ -4,6 +4,7 @@ import { ArrowUpRight, Eye, EyeOff, Copy, Check, ExternalLink } from 'lucide-rea
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../contexts/AuthContext'
 import { useToast } from '../hooks/useToast'
+import Modal from '../components/editorial/Modal'
 import { ICON } from '../utils/constants'
 import { CLOSER_TOOLS } from '../data/closerTools'
 import { callCloserHub, loadCloserHubSettings, saveCloserHubSettings } from '../lib/closerHub'
@@ -211,19 +212,105 @@ function SiteLogo({ website, name }) {
   return <span style={{ ...box, background: 'rgba(244,225,74,.55)', color: 'var(--ink)', fontFamily: 'var(--serif)', fontSize: 13, fontWeight: 500 }}>{letters}</span>
 }
 
+/* A referral's card. Ben, 13 Sep 2026: "a little pop-up. I can click on
+   them, and it gives me a list of all their GMBs, their website, a client
+   video they've recorded, their phone number or contact details." GMBs,
+   website and contact come live from the client dashboard; the videos are
+   links kept on the referral. */
+function ReferralCard({ item: r, onClose, copy }) {
+  const [card, setCard] = useState(undefined)
+  useEffect(() => {
+    let alive = true
+    setCard(undefined)
+    callCloserHub('client_card', { company: r.name, email: r.email || '' }).then(c => { if (alive) setCard(c) }).catch(() => { if (alive) setCard(null) })
+    return () => { alive = false }
+  }, [r])
+  const cl = card?.client
+  const gmbs = card?.gmbs || []
+  const videos = (r.videos || []).filter(Boolean)
+  const phone = cl?.phone || r.phone
+  const email = cl?.email || r.email
+  const website = cl?.website || r.website
+  const contact = cl?.contact_name || r.contact
+  const Section = ({ title, children }) => (
+    <div style={{ marginBottom: 18 }}>
+      <div className="eyebrow" style={{ marginBottom: 8 }}>{title}</div>
+      {children}
+    </div>
+  )
+  const Row = ({ children, first }) => <div className="flex items-center gap-2 flex-wrap" style={{ padding: '8px 0', borderTop: first ? 0 : '1px solid var(--rule)', fontSize: 13 }}>{children}</div>
+  const small = { height: 28, fontSize: 12, padding: '0 10px' }
+  return (
+    <Modal open onClose={onClose} size="md" eyebrow="Referral" title={r.name}
+      subtitle={[contact, cl?.city && cl?.state ? `${cl.city}, ${cl.state}` : r.location, cl?.account_manager ? `account manager ${cl.account_manager}` : null].filter(Boolean).join(' · ')}
+      footer={<div className="flex justify-end"><button type="button" className="editorial-btn-ghost" onClick={onClose}>Close</button></div>}>
+      <div style={{ padding: '18px 24px 6px' }}>
+        {card === undefined && <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--ink-4)' }}>Reading the client book.</p>}
+        {card === null && <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--house-warn)' }}>The client dashboard did not answer; showing what the referral holds.</p>}
+        {card && !cl && <p style={{ margin: '0 0 14px', fontSize: 13, color: 'var(--house-warn)' }}>Not found in the client book under this name; showing what the referral holds.</p>}
+
+        <Section title="Contact">
+          <Row first>
+            <span style={{ fontWeight: 600, flex: 1 }}>{contact || 'No contact name'}</span>
+          </Row>
+          {phone && <Row><span style={{ flex: 1 }}>{phone}</span><a href={`tel:${phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-primary" style={small}>Call</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(phone)}><Copy size={ICON.sm} /></button></Row>}
+          {email && <Row><span style={{ flex: 1 }} className="truncate">{email}</span><a href={`mailto:${email}`} className="editorial-btn-ghost" style={small}>Email</a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(email)}><Copy size={ICON.sm} /></button></Row>}
+          {!phone && !email && <Row><span style={{ color: 'var(--ink-4)' }}>No phone or email on record.</span></Row>}
+        </Section>
+
+        <Section title="Website">
+          {website
+            ? <Row first><span style={{ flex: 1 }} className="truncate">{website.replace(/^https?:\/\//, '')}</span><a href={website} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(website)}><Copy size={ICON.sm} /></button></Row>
+            : <Row first><span style={{ color: 'var(--ink-4)' }}>No website on record.</span></Row>}
+        </Section>
+
+        <Section title={`Google Business Profiles${gmbs.length ? ` (${gmbs.length})` : ''}`}>
+          {gmbs.length === 0 && <Row first><span style={{ color: 'var(--ink-4)' }}>{cl ? 'None on record.' : 'Unknown until the client book answers.'}</span></Row>}
+          {gmbs.map((g, i) => (
+            <Row key={g.url || g.name} first={i === 0}>
+              <div className="min-w-0 flex-1">
+                <div style={{ fontWeight: 600 }} className="truncate">{g.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type].filter(Boolean).join(' · ')}</div>
+              </div>
+              {g.status && <span className={`pill ${g.status === 'active' ? 'pill-up' : 'pill-soft'}`}>{g.status}</span>}
+              {g.url && <a href={g.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Maps <ExternalLink size={ICON.sm} /></a>}
+            </Row>
+          ))}
+        </Section>
+
+        <Section title={`Videos${videos.length ? ` (${videos.length})` : ''}`}>
+          {videos.length === 0 && <Row first><span style={{ color: 'var(--ink-4)' }}>No videos added yet. An admin adds links on the referral.</span></Row>}
+          {videos.map((v, i) => (
+            <Row key={v} first={i === 0}><span style={{ flex: 1 }} className="truncate">{v.replace(/^https?:\/\//, '')}</span><a href={v} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Watch <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v)}><Copy size={ICON.sm} /></button></Row>
+          ))}
+        </Section>
+
+        {(r.link || cl?.drive_folder_url) && (
+          <Section title="More">
+            {r.link && <Row first><span style={{ flex: 1 }}>Case study or review</span><a href={r.link} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
+            {cl?.drive_folder_url && <Row first={!r.link}><span style={{ flex: 1 }}>Drive folder</span><a href={cl.drive_folder_url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a></Row>}
+          </Section>
+        )}
+      </div>
+    </Modal>
+  )
+}
+
 function CaseStudies({ settings, copy, isAdmin, onSaved }) {
   const toast = useToast()
   const list = (() => { try { const v = JSON.parse(settings.case_studies || '[]'); return Array.isArray(v) ? v : [] } catch { return [] } })()
   const [adding, setAdding] = useState(false)
-  const [draft, setDraft] = useState({ name: '', contact: '', phone: '', website: '', link: '', note: '' })
+  const [open, setOpen] = useState(null)
+  const [draft, setDraft] = useState({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '' })
   const persist = async (next) => {
     try { await saveCloserHubSettings({ case_studies: JSON.stringify(next) }); onSaved({ ...settings, case_studies: JSON.stringify(next) }); toast.success('Saved.') }
     catch (e) { toast.error(e.message) }
   }
   const add = async () => {
     if (!draft.name.trim()) return toast.error('A name at least.')
-    await persist([...list, { ...draft, website: draft.website && !/^https?:/.test(draft.website) ? `https://${draft.website}` : draft.website }])
-    setDraft({ name: '', contact: '', phone: '', website: '', link: '', note: '' }); setAdding(false)
+    const videos = String(draft.videos || '').split(/\n|,/).map(x => x.trim()).filter(Boolean)
+    await persist([...list, { ...draft, videos, website: draft.website && !/^https?:/.test(draft.website) ? `https://${draft.website}` : draft.website }])
+    setDraft({ name: '', contact: '', phone: '', website: '', link: '', note: '', videos: '' }); setAdding(false)
   }
   const remove = (i) => persist(list.filter((_, k) => k !== i))
   return (
@@ -237,11 +324,13 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
       {list.map((c, i) => (
         <div key={c.name + i} style={{ padding: '9px 0', borderTop: i ? '1px solid var(--rule)' : 0, fontSize: 13 }}>
           <div className="flex items-center gap-3">
+            <button type="button" className="house-plain flex items-center gap-3 min-w-0 flex-1" style={{ background: 'none', border: 0, padding: 0, textAlign: 'left', cursor: 'pointer', color: 'inherit' }} onClick={() => setOpen(c)} title="Open their card">
             <SiteLogo website={c.website} name={c.name} />
             <div className="min-w-0 flex-1">
-              <div style={{ fontWeight: 600 }} className="truncate">{c.name}</div>
+              <div style={{ fontWeight: 600 }} className="truncate">{c.name} <ArrowUpRight size={ICON.sm} style={{ display: 'inline', verticalAlign: '-2px', color: 'var(--ink-4)' }} /></div>
               {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
             </div>
+            </button>
             {isAdmin && <button type="button" className="editorial-btn-ghost" style={{ height: 24, fontSize: 11, padding: '0 7px' }} onClick={() => remove(i)} title="Remove">×</button>}
           </div>
           {c.note && <div style={{ fontSize: 12, color: 'var(--ink-3)', marginTop: 4, paddingLeft: 42 }}>{c.note}</div>}
@@ -253,11 +342,13 @@ function CaseStudies({ settings, copy, isAdmin, onSaved }) {
           </div>
         </div>
       ))}
+      {open && <ReferralCard item={open} onClose={() => setOpen(null)} copy={copy} />}
       {adding && (
         <div className="grid gap-2 mt-2" style={{ paddingTop: 10, borderTop: '1px solid var(--rule)' }}>
           {[['name', 'Business'], ['contact', 'Contact name'], ['phone', 'Phone'], ['website', 'Website'], ['link', 'Case study or review link'], ['note', 'One line about them']].map(([k, l]) => (
             <input key={k} value={draft[k]} onChange={(e) => setDraft(d => ({ ...d, [k]: e.target.value }))} placeholder={l} style={{ height: 34, fontSize: 13 }} />
           ))}
+          <textarea rows={2} value={draft.videos} onChange={(e) => setDraft(d => ({ ...d, videos: e.target.value }))} placeholder="Video links, one per line" style={{ fontSize: 13 }} />
           <div><button type="button" className="editorial-btn-primary" style={{ height: 30, fontSize: 12.5 }} onClick={add}>Save referral</button></div>
         </div>
       )}
