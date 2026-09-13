@@ -55,7 +55,14 @@ function pdHeaders(): Record<string, string> {
 }
 
 async function pd(method: string, path: string, body?: any) {
-  const r = await fetch(`${PANDADOC}${path}`, { method, headers: pdHeaders(), body: body ? JSON.stringify(body) : undefined })
+  let r: Response = await fetch(`${PANDADOC}${path}`, { method, headers: pdHeaders(), body: body ? JSON.stringify(body) : undefined })
+  // PandaDoc throttles bursts and says when to come back ("Expected available
+  // in 7 seconds"). Wait that long, capped at 12 s, and try again, twice.
+  for (let tries = 0; r.status === 429 && tries < 2; tries++) {
+    const said = Number(((await r.text()).match(/available in (\d+) second/i) || [])[1] || r.headers.get('retry-after') || 5)
+    await new Promise((res) => setTimeout(res, Math.min(12, Math.max(1, said)) * 1000 + 300))
+    r = await fetch(`${PANDADOC}${path}`, { method, headers: pdHeaders(), body: body ? JSON.stringify(body) : undefined })
+  }
   const text = await r.text()
   let json: any = {}
   try { json = text ? JSON.parse(text) : {} } catch { json = { raw: text } }
@@ -125,14 +132,14 @@ async function templates(admin: any) {
   // Ben, 14 Sep 2026: "how do I know which contract is which?" Each entry
   // says who signs, whether a signature box is missing, and links to PandaDoc.
   const detailed = await Promise.all(list.map(async (x: any) => {
-    if (String(x.id).startsWith('file:')) return { ...x, kind: 'file', roles: ['Closer', 'Client'], signatures: { Closer: 1, Client: 1 }, missing: [], url: null }
+    if (String(x.id).startsWith('file:')) return { ...x, kind: 'file', roles: ['Closer', 'Client'], signatures: { Closer: 1, Client: 1 }, missing: [], fields: ['ClientName', 'MonthlyFee', 'SpecialConditions', 'OptRepName', 'ExecutionDate'], url: null }
     try {
       const sh = await templateShape(x.id)
       const missing = [
         ...(sh.clientRole && !sh.signatures[sh.clientRole] ? ['the client'] : []),
         ...(sh.optRole && !sh.signatures[sh.optRole] ? ['OPT'] : []),
       ]
-      return { ...x, kind: 'pandadoc', roles: sh.roles, signatures: sh.signatures, missing, url: `https://app.pandadoc.com/a/#/templates/${x.id}` }
+      return { ...x, kind: 'pandadoc', roles: sh.roles, signatures: sh.signatures, missing, client_role: sh.clientRole, opt_role: sh.optRole, fields: [...sh.fields], url: `https://app.pandadoc.com/a/#/templates/${x.id}` }
     } catch {
       return { ...x, kind: 'pandadoc', roles: [], signatures: {}, missing: [], url: `https://app.pandadoc.com/a/#/templates/${x.id}` }
     }
@@ -145,8 +152,12 @@ async function templates(admin: any) {
 // other ("Role 1"/"Client", "Role 1"/"Role 2", "Client"/"Opt", "Client"/
 // "Creator", or "Client" alone), and the trial ones carry only generic
 // Text/Date fields, so nothing is assumed: the template is asked.
+// Template details barely change; keep them ten minutes per warm instance.
+const shapeCache = new Map<string, { at: number; d: any }>()
 async function templateShape(templateId: string) {
-  const d = await pd('GET', `/templates/${templateId}/details`)
+  const hit = shapeCache.get(templateId)
+  const d = hit && Date.now() - hit.at < 600000 ? hit.d : await pd('GET', `/templates/${templateId}/details`)
+  if (!hit || hit.d !== d) shapeCache.set(templateId, { at: Date.now(), d })
   const roles: string[] = (d.roles || []).map((r: any) => r.name).filter(Boolean)
   const clientRole = roles.find((r) => r.toLowerCase() === 'client') || roles.find((r) => r === 'Role 2') || roles[roles.length - 1] || ''
   const optRole = roles.find((r) => r !== clientRole) || ''
@@ -250,14 +261,9 @@ async function createContract(admin: any, who: Caller, body: any) {
     return { status: 200, body: result }
   }
   const shape = await templateShape(template)
-  // A contract one side cannot sign is not a contract. Ben's hand-made AU
-  // template (13 Sep) had only the client's signature box; say so plainly
-  // rather than send it.
-  const missing = [
-    ...(shape.clientRole && !shape.signatures[shape.clientRole] ? ['the client'] : []),
-    ...(shape.optRole && !shape.signatures[shape.optRole] ? ['OPT'] : []),
-  ]
-  if (missing.length) return { status: 400, body: { error: `The template "${shape.name.trim()}" has no signature box for ${missing.join(' or ')} (roles ${shape.roles.join(' / ')}). Add one in PandaDoc's template editor, or pick another template.`, code: 'no_signature_box', signatures: shape.signatures } }
+  // A contract the client cannot sign is not a contract. OPT's own box is
+  // optional: the live trial agreement and the AU M2M are client-signed only.
+  if (shape.clientRole && !shape.signatures[shape.clientRole]) return { status: 400, body: { error: `The template "${shape.name.trim()}" has no signature box for the client (roles ${shape.roles.join(' / ')}). Add one in the PandaDoc template editor, or pick another template.`, code: 'no_signature_box', signatures: shape.signatures } }
   const wanted: Record<string, { value: string }> = {
     ClientName: { value: company },
     MonthlyFee: { value: fee },
