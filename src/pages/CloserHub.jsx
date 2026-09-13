@@ -249,7 +249,7 @@ function ReferralCard({ item: r, onClose, copy }) {
     }
     return out
   })()
-  const videos = (r.videos || []).filter(Boolean)
+  const videos = (r.videos || []).filter(Boolean).map(v => (typeof v === 'string' ? { url: v, title: '' } : v)).filter(v => v.url)
   const phone = cl?.phone || r.phone
   const email = cl?.email || r.email
   const website = cl?.website || r.website
@@ -312,7 +312,18 @@ function ReferralCard({ item: r, onClose, copy }) {
         <Section title={`Videos${videos.length ? ` (${videos.length})` : ''}`}>
           {videos.length === 0 && <Row first><Icon><Video size={14} /></Icon><span style={{ color: 'var(--ink-4)' }}>No videos added yet. An admin adds links on the referral.</span></Row>}
           {videos.map((v, i) => (
-            <Row key={v} first={i === 0}><Icon><Video size={14} /></Icon><span style={{ flex: 1 }} className="truncate">{v.replace(/^https?:\/\//, '')}</span><a href={v} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Watch <ExternalLink size={ICON.sm} /></a><button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v)}><Copy size={ICON.sm} /></button></Row>
+            <div key={v.url} style={{ padding: '10px 0', borderTop: i === 0 ? 0 : '1px solid var(--rule)' }}>
+              {/\.(mp4|webm|mov)(\?|$)/i.test(v.url) ? (
+                <video controls playsInline preload="none" poster={v.poster || undefined} src={v.url}
+                  style={{ display: 'block', width: '100%', maxWidth: 300, maxHeight: 420, borderRadius: 12, background: '#000' }} />
+              ) : null}
+              <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 8, fontSize: 13 }}>
+                <Icon><Video size={14} /></Icon>
+                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{v.title || v.url.replace(/^https?:\/\//, '')}</span>
+                <a href={v.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a>
+                <button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v.url)} title="Copy the link to send to a prospect"><Copy size={ICON.sm} /></button>
+              </div>
+            </div>
           ))}
         </Section>
 
