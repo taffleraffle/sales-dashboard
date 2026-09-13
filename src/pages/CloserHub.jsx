@@ -410,13 +410,14 @@ const REGIONS = [['us', 'USA'], ['au', 'AU'], ['nz', 'NZ']]
 const regionOf = (country) => { const c = String(country || '').toUpperCase(); return c === 'AU' || c === 'AUSTRALIA' ? 'au' : c === 'NZ' || c === 'NEW ZEALAND' ? 'nz' : 'us' }
 
 // Ben's list, 12 Sep 2026, in his order.
-// Ben's list, 12 Sep 2026, in his order. Channels and the card move are done
+// Ben's list, 12 Sep 2026, in his order. The channel and the card move are done
 // by hand in Slack and GoHighLevel ("there should be no button for that one").
+// Only the opt- channel is on the list (13 Sep): the client- one is made by the
+// onboarding flow when the close fires.
 const STEPS = [
   ['payment', 'Take payment', 'Commas by default. Stripe only if Commas will not work for them. Ticks itself when the payment lands.'],
   ['contract', 'Send contract', 'Drafts it in PandaDoc and sends the signing links in one go. Draft only if you want to look first.'],
-  ['channel_client', 'Make client channel', 'In Slack: client-<business>, private, the account-management team.'],
-  ['channel_opt', 'Make opt channel and add the client', 'In Slack: opt-<business>, private, the team plus the client as a guest.'],
+  ['channel_opt', 'Make the opt channel and add the client', 'In Slack: opt-<business>, private. Add the team and the client as a guest. The client- channel is made for you at onboarding.'],
   ['form', 'Send onboarding form and book onboarding call', 'Send the page after payment, then book the kickoff for the next day. On a trial, forward-book the ascension call too.'],
   ['ghl', 'Move in GoHighLevel', 'Closed for a trial, New Map Closes for a retainer. This posts the close and starts onboarding.'],
   ['notes', 'Leave post-call notes in the Slack channel', 'Who they are, what they are like, what was promised. Run the recording through the summariser first.'],
@@ -778,7 +779,6 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                       <button type="button" className="editorial-btn-ghost" style={{ height: 30, fontSize: 12.5 }} onClick={() => setConfirmSend(false)}>Not yet</button>
                     </div>
                   )}
-                  {key === 'channel_client' && <LinkButton label={`client-${slugOf(form.company)}`} url={`client-${slugOf(form.company)}`} copy={copy} />}
                   {key === 'channel_opt' && (
                     <>
                       <LinkButton label={`opt-${slugOf(form.company)}`} url={`opt-${slugOf(form.company)}`} copy={copy} />
