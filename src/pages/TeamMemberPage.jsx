@@ -302,33 +302,46 @@ function GhlCard({ m, save, canEdit }) {
 }
 
 function CalendarCard({ m }) {
-  const [state, setState] = useState({ status: 'idle', events: [], error: null })
+  const [state, setState] = useState({ status: 'idle', events: [], calendly: [], error: null })
+  // Two calendars can carry this person's calls: their GoHighLevel user's
+  // calendar (US funnels) and Calendly events they host (the Australian
+  // strategy call never reaches GoHighLevel). Ben, 13 Sep 2026: Ash's check
+  // showed nothing because only the first was looked at.
   const check = async () => {
-    if (!m.ghl_user_id) return
-    setState({ status: 'loading', events: [], error: null })
-    try {
-      const start = Date.now() - 7 * 86400000
-      const end = Date.now() + 30 * 86400000
-      const url = `${BASE_URL}/calendars/events?locationId=${GHL_LOCATION_ID}&userId=${encodeURIComponent(m.ghl_user_id)}&startTime=${start}&endTime=${end}`
-      const res = await ghlFetch(url)
-      if (!res.ok) {
-        const why = res.status === 429 ? 'GoHighLevel is rate-limiting this dashboard right now. Wait a minute and check again.'
-          : res.status === 401 || res.status === 403 ? 'GoHighLevel rejected the API key on this dashboard (not this person). Check VITE_GHL_API_KEY.'
-          : `GoHighLevel replied ${res.status}. The GHL user ID above is probably wrong.`
-        throw new Error(why)
-      }
-      const j = await res.json()
-      const events = (j.events || []).sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
-      setState({ status: 'done', events, error: null })
-    } catch (err) {
-      setState({ status: 'error', events: [], error: err.message })
+    if (!m.ghl_user_id && !m.email) return
+    setState({ status: 'loading', events: [], calendly: [], error: null })
+    const start = Date.now() - 7 * 86400000
+    const end = Date.now() + 30 * 86400000
+    let events = [], calendly = [], error = null
+    if (m.ghl_user_id) {
+      try {
+        const url = `${BASE_URL}/calendars/events?locationId=${GHL_LOCATION_ID}&userId=${encodeURIComponent(m.ghl_user_id)}&startTime=${start}&endTime=${end}`
+        const res = await ghlFetch(url)
+        if (!res.ok) {
+          throw new Error(res.status === 429 ? 'GoHighLevel is rate-limiting this dashboard right now. Wait a minute and check again.'
+            : res.status === 401 || res.status === 403 ? 'GoHighLevel rejected the API key on this dashboard (not this person). Check VITE_GHL_API_KEY.'
+            : `GoHighLevel replied ${res.status}. The GHL user ID above is probably wrong.`)
+        }
+        const j = await res.json()
+        events = (j.events || []).sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
+      } catch (err) { error = err.message }
     }
+    if (m.email) {
+      const { data, error: calErr } = await supabase.from('calendly_bookings')
+        .select('event_uri, event_name, invitee_name, start_time, status')
+        .ilike('host_email', m.email).eq('status', 'active')
+        .gte('start_time', new Date(start).toISOString()).lte('start_time', new Date(end).toISOString())
+        .order('start_time')
+      if (calErr) error = error || `Calendly: ${calErr.message}`
+      calendly = data || []
+    }
+    setState({ status: error && !events.length && !calendly.length ? 'error' : 'done', events, calendly, error })
   }
   const fmt = (iso) => new Date(iso).toLocaleString('en-US', { timeZone: 'America/New_York', weekday: 'short', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })
   return (
-    <Card step={4} icon={CalendarCheck} title="Calendar" sub="Bookings reach this dashboard through the GHL user above. Checking pulls the last week and next 30 days of their GHL calendar to prove it works." ok={!!m.ghl_user_id}>
-      {!m.ghl_user_id ? (
-        <p style={{ fontSize: 13.5, color: 'var(--ink-4)', margin: 0 }}>Link their GoHighLevel user first, then come back and check the calendar.</p>
+    <Card step={4} icon={CalendarCheck} title="Calendar" sub="Bookings reach this dashboard two ways: through the GHL user above (US funnels) and through Calendly events this person hosts, matched by their email (the Australian strategy call). Checking pulls the last week and next 30 days of both." ok={!!m.ghl_user_id || !!m.email}>
+      {!m.ghl_user_id && !m.email ? (
+        <p style={{ fontSize: 13.5, color: 'var(--ink-4)', margin: 0 }}>Link their GoHighLevel user or set their email first, then come back and check the calendar.</p>
       ) : (
         <>
           <button type="button" className="editorial-btn-ghost" onClick={check} disabled={state.status === 'loading'}>
@@ -337,13 +350,21 @@ function CalendarCard({ m }) {
           {state.status === 'error' && <p style={{ fontSize: 13.5, color: 'var(--house-bad)', margin: '12px 0 0' }}>{state.error}</p>}
           {state.status === 'done' && (
             <div className="mt-4">
-              <div className="callout" style={{ marginBottom: state.events.length ? 12 : 0 }}>
-                <b>{state.events.length}</b> {state.events.length === 1 ? 'call' : 'calls'} found on their calendar (last 7 days plus next 30). {state.events.length ? 'The connection is working.' : 'If they definitely have calls booked, the GHL user is probably wrong.'}
+              <div className="callout" style={{ marginBottom: (state.events.length || state.calendly.length) ? 12 : 0 }}>
+                <b>{state.events.length}</b> on their GoHighLevel calendar, <b>{state.calendly.length}</b> on Calendly hosted by {m.email} (last 7 days plus next 30).
+                {' '}{(state.events.length || state.calendly.length) ? 'The connection is working.' : 'If they definitely have calls booked, the GHL user or the email is probably wrong.'}
+                {state.error && <span style={{ display: 'block', color: 'var(--house-warn)', marginTop: 4 }}>{state.error}</span>}
               </div>
               {state.events.slice(0, 6).map(ev => (
                 <div key={ev.id} className="flex items-center justify-between gap-3" style={{ padding: '10px 0', borderTop: '1px solid var(--rule)', fontSize: 13.5 }}>
-                  <span className="truncate" style={{ fontWeight: 500 }}>{ev.title || 'Untitled call'}</span>
+                  <span className="truncate" style={{ fontWeight: 500 }}>{ev.title || 'Untitled call'} <span className="pill pill-soft" style={{ marginLeft: 6 }}>GHL</span></span>
                   <span style={{ color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{fmt(ev.startTime)} ET</span>
+                </div>
+              ))}
+              {state.calendly.slice(0, 6).map(ev => (
+                <div key={ev.event_uri} className="flex items-center justify-between gap-3" style={{ padding: '10px 0', borderTop: '1px solid var(--rule)', fontSize: 13.5 }}>
+                  <span className="truncate" style={{ fontWeight: 500 }}>{ev.invitee_name || 'Booking'}{ev.event_name ? `, ${ev.event_name}` : ''} <span className="pill pill-soft" style={{ marginLeft: 6 }}>Calendly</span></span>
+                  <span style={{ color: 'var(--ink-4)', whiteSpace: 'nowrap' }}>{fmt(ev.start_time)} ET</span>
                 </div>
               ))}
             </div>

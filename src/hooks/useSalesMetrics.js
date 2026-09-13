@@ -183,6 +183,25 @@ async function load(range, region = 'all') {
     if (error) { problems.push(`appointments: ${error.message}`); break }
     for (const a of (data || [])) if (a.closer_id) bookingsByCloser[a.closer_id] = (bookingsByCloser[a.closer_id] || 0) + 1
   }
+  // Calendly bookings (the Australian strategy call) never reach GoHighLevel,
+  // so they attach to the closer who HOSTS the Calendly event, matched by
+  // email. Ben, 13 Sep 2026: Ash's calls were on the dashboard but on nobody's
+  // calendar. Same booked-at window as the calendar bookings above.
+  if (inRegion('Australia')) {
+    const [{ data: hosts, error: hostErr }, { data: cal, error: calErr }] = await Promise.all([
+      supabase.from('team_members').select('id, email'),
+      supabase.from('calendly_bookings').select('host_email, invitee_name, status').gte('booked_at', startStr).lte('booked_at', endStr).eq('status', 'active'),
+    ])
+    if (hostErr) problems.push(`team: ${hostErr.message}`)
+    if (calErr) problems.push(`calendly: ${calErr.message}`)
+    const byEmail = {}
+    for (const t of hosts || []) if (t.email) byEmail[t.email.toLowerCase()] = t.id
+    for (const b of cal || []) {
+      if (/opt digital|test/i.test(b.invitee_name || '')) continue
+      const id = byEmail[(b.host_email || '').toLowerCase()]
+      if (id) bookingsByCloser[id] = (bookingsByCloser[id] || 0) + 1
+    }
+  }
 
   // ── Confirmed / unconfirmed show marks, company and per closer ──
   const confByCloser = {}
