@@ -24,6 +24,8 @@ const SETTING_FIELDS = [
   ['fee_trial', 'Trial fee', 'Digits only.'],
   ['template_retainer', 'PandaDoc template: retainer', 'The default picked when the deal type is Retainer.'],
   ['template_trial', 'PandaDoc template: trial', 'The default picked when the deal type is Trial.'],
+  ['template_retainer_au', 'PandaDoc template: retainer, Australia', 'Used when the region is AU. Blank falls back to the retainer template.'],
+  ['template_trial_au', 'PandaDoc template: trial, Australia', 'Used when the region is AU. Blank falls back to the trial template.'],
   ['template_active_ids', 'Templates shown in the picker', 'Comma-separated PandaDoc template ids. Templates with ACTIVE in their name show too.'],
   ['role_opt', 'Template role: OPT', 'Usually "Role 1".'],
   ['role_client', 'Template role: client', '"Client" on the retainer template.'],
@@ -511,10 +513,13 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
       setForm(f => ({ ...f, signer: (me || signers[0]).email }))
     }
   }, [signers, meEmail])  // eslint-disable-line react-hooks/exhaustive-deps
+  // The default template follows the deal type and the region: the Australian
+  // agreement is the same contract in AUD (Ben, 13 Sep 2026).
+  const defaultTemplate = (offer, region) => (region === 'au' ? settings[`template_${offer}_au`] : '') || settings[`template_${offer}`] || ''
   useEffect(() => {
     if (deal) return
-    setForm(f => ({ ...f, template: settings[`template_${f.offer}`] || '', fee: '' }))
-  }, [form.offer, settings])  // eslint-disable-line react-hooks/exhaustive-deps
+    setForm(f => ({ ...f, template: defaultTemplate(f.offer, f.region), fee: '' }))
+  }, [form.offer, form.region, settings])  // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => { onRegion?.(form.region) }, [form.region])  // eslint-disable-line react-hooks/exhaustive-deps
   const fee = form.fee || settings[`fee_${form.offer}`] || ''
@@ -546,7 +551,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
       template: row.template || '', fee: row.fee || '', extra: row.extra || '', signer: row.signer_email || form.signer, region: row.data?.region || 'us' })
     setConfirmSend(false); setNote({}); setContact(row.data?.ghl_contact || null); setHits(null); setQ('')
   }
-  const reset = () => { setContact(null); setHits(null); setQ(''); setDeal(null); setForm({ ...BLANK, signer: form.signer, template: settings.template_retainer || '' }); setConfirmSend(false); setNote({}) }
+  const reset = () => { setContact(null); setHits(null); setQ(''); setDeal(null); setForm({ ...BLANK, signer: form.signer, template: defaultTemplate('retainer', 'us') }); setConfirmSend(false); setNote({}) }
   const finish = async () => { const id = deal?.id; await save({ status: 'done' }); setOpenDeals(o => o.filter(x => x.id !== id)); reset(); toast.success('Deal finished and saved. On to the next one.') }
 
   const run = async (key, fn) => {
@@ -592,7 +597,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
     if (!form.name.trim()) throw new Error('Client name is needed: it goes on the agreement as the person signing.')
     if (!signer) throw new Error('Pick who signs for OPT.')
     say('Drafting in PandaDoc. It fills the template and settles the draft, usually 10 to 30 seconds.')
-    const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template,
+    const r = await callCloserHub('create_contract', { company: form.company, email: form.email, signer_name: form.name, offer: form.offer, template: form.template, region: form.region,
       fee, extra_conditions: form.extra, opt_rep_name: signer?.name || '', opt_rep_email: signer?.email || '' })
     const row = await save({ data: { ...(deal?.data || {}), contract: { ...r, sent: false } } })
     say(`Drafted: ${r.name}. Open it in PandaDoc to review.`)
@@ -685,7 +690,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
           <Field label="Client email"><input type="email" value={form.email} onChange={set('email')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="owner@kingsroofing.com" /></Field>
           <Field label="Client name" hint="The person who signs. Goes on the agreement."><input value={form.name} onChange={set('name')} onBlur={() => deal && filled && save().catch(e => toast.error(e.message))} placeholder="Jane Smith" /></Field>
           <Field label="Deal type">
-            <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value, template: settings[`template_${e.target.value}`] || '', fee: '' }))}>
+            <select value={form.offer} onChange={(e) => setForm(f => ({ ...f, offer: e.target.value, template: defaultTemplate(e.target.value, f.region), fee: '' }))}>
               <option value="trial">Trial</option>
               <option value="retainer">Retainer</option>
             </select>
