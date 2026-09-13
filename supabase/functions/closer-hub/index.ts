@@ -491,6 +491,154 @@ async function clientCard(body: any) {
   return { status: r.ok ? 200 : (r.status || 502), body: out }
 }
 
+// ── post-call notes ─────────────────────────────────────────────────────────
+// Ben, 13 Sep 2026: "take a Fathom transcript and then spit out something
+// like this". The closer pastes the Fathom share link (or the transcript);
+// the meeting is found through Fathom's API, the transcript goes to Claude
+// with Ben's template as the rules, and the notes come back ready to drop in
+// the client's Slack channel.
+
+const NOTES_SYSTEM = `You write post-call notes for OPT Digital, a local SEO agency, from the transcript of a sales call that closed (or is about to). The account manager who reads them was not on the call and must be able to onboard the client from these notes alone.
+
+Write in plain English. No em dashes anywhere; use commas, full stops or a colon instead. No headings other than the ones below. No preamble, no sign-off, no commentary about the transcript itself.
+
+Output EXACTLY this shape, as Slack-ready text (bold with single asterisks, one blank line between blocks):
+
+Name: <client's full name>
+Phone Number: <number, or "not captured on call">
+Email: <email>
+OB Call Booked: <day, date and time with timezone, or "not booked yet">
+Website: <url>
+Trial: <Y or N>
+Scope/Info:
+
+*Personality*
+<one paragraph: how they think, decide and communicate; what they respond to; who else is involved in decisions>
+
+*Past Experience*
+<one or two paragraphs: the business, size, revenue, lead sources, ad spend, prior agencies or vendors and how that went, assets they already have and what those have produced. Include other businesses they own if mentioned>
+
+*Concerns*
+<one paragraph: objections raised and what settled them, what they need to see, anything they are wary of>
+
+*Goals*
+<one paragraph: the numbers they want, the channels, the timeframe, expansion plans>
+
+*Priorities & Action Points*
+<a bulleted list, one line each, starting with the technical and structural fixes, then content, reviews, citations, tracking, then admin items such as documents to send and the onboarding form>
+<the last two bullets are always:>
+Trial scope: <what the trial covers, price, length, what success looks like. If it is a retainer with no trial, say "No trial: retainer from day one" and describe month one>
+Post-trial roadmap (do not scope into trial): <what comes after, price, what was deliberately parked and why>
+
+<then, only if something is missing:>
+Gaps to fill before the OB call: <one line per missing item, e.g. no phone number captured, partner's surname not confirmed>
+
+Rules: header lines are one short line each; any doubt about them goes in the Gaps line, not the header. The closer is whoever the transcript shows speaking for OPT; the deal record's closer name is only a hint. Never invent facts. If the transcript does not cover something, say so in the Gaps line rather than guessing. Keep numbers exactly as spoken (revenue, ad spend, review counts, prices). Name the people (client, partner, closer) as they are named on the call. Use the deal details supplied below for the header where the transcript is silent.`
+
+const FATHOM = 'https://api.fathom.ai/external/v1'
+async function fathomGet(path: string) {
+  const key = Deno.env.get('FATHOM_API_KEY') || ''
+  if (!key) throw new Error('FATHOM_API_KEY is not set')
+  const r = await fetch(`${FATHOM}${path}`, { headers: { 'X-Api-Key': key } })
+  if (r.status === 429) throw new Error('Fathom is rate-limiting us for a minute. Wait a moment and try again, or paste the transcript.')
+  if (!r.ok) throw new Error(`Fathom answered ${r.status}`)
+  return r.json()
+}
+
+// Find the recording behind a share link. The list is paged newest first
+// without transcripts (cheap, 60 calls a minute); the client's email narrows
+// it to their own meetings first. The transcript is then one call by
+// recording id (that endpoint allows 10 a minute).
+async function fathomTranscript(shareUrl: string, invitee = ''): Promise<{ title: string; text: string; started: string } | null> {
+  const want = shareUrl.trim().split('?')[0].replace(/\/$/, '')
+  const since = new Date(Date.now() - 45 * 86400000).toISOString()
+  const same = (m: any) => String(m.share_url || '').split('?')[0].replace(/\/$/, '') === want
+  let hit: any = null
+  if (invitee) {
+    const j: any = await fathomGet(`/meetings?${new URLSearchParams({ created_after: since, 'calendar_invitees[]': invitee })}`)
+    hit = (j.items || []).find(same) || null
+  }
+  let cursor = ''
+  for (let page = 0; page < 30 && !hit; page++) {
+    const q = new URLSearchParams({ created_after: since })
+    if (cursor) q.set('cursor', cursor)
+    const j: any = await fathomGet(`/meetings?${q}`)
+    hit = (j.items || []).find(same) || null
+    cursor = j.next_cursor || ''
+    if (!cursor) break
+  }
+  if (!hit) return null
+  const t: any = await fathomGet(`/recordings/${hit.recording_id}/transcript`)
+  const lines = (t.transcript || []).map((x: any) => `${x.timestamp || ''} ${x.speaker?.display_name || 'Unknown'}: ${x.text || ''}`.trim())
+  return { title: hit.title || hit.meeting_title || '', text: lines.join('\n'), started: hit.recording_start_time || hit.scheduled_start_time || '' }
+}
+
+async function callNotes(admin: any, who: Caller, body: any) {
+  const apiKey = Deno.env.get('ANTHROPIC_API_KEY') || ''
+  if (!apiKey) return { status: 500, body: { error: 'ANTHROPIC_API_KEY is not set' } }
+  const s = await settings(admin)
+  let transcript = String(body.transcript || '').trim()
+  let title = ''
+  if (!transcript && body.fathom_url) {
+    const m = await fathomTranscript(String(body.fathom_url), String(body.deal?.email || ''))
+    if (!m) return { status: 404, body: { error: 'That Fathom link was not found among the last 45 days of recordings. Check the link, or paste the transcript instead.' } }
+    if (!m.text) return { status: 422, body: { error: `Fathom has no transcript yet for "${m.title}". Give it a few minutes, or paste the transcript.` } }
+    transcript = m.text; title = m.title
+  }
+  if (transcript.length < 200) return { status: 400, body: { error: 'Paste the Fathom share link or the transcript itself.' } }
+  const deal = body.deal || {}
+  const header = [
+    `Company: ${deal.company || 'unknown'}`, `Client name: ${deal.name || 'unknown'}`, `Email: ${deal.email || 'unknown'}`,
+    `Phone: ${deal.phone || 'unknown'}`, `Website: ${deal.website || 'unknown'}`,
+    `Deal type: ${deal.offer === 'trial' ? 'Trial ($997, two weeks)' : 'Retainer'}`, `Onboarding call booked: ${deal.onboarding_call || 'unknown'}`,
+    `Closer on the call: ${deal.closer || who.name}`, `Today: ${new Date().toISOString().slice(0, 10)}`,
+  ].join('\n')
+  const model = s.notes_model || 'claude-opus-5'
+  const r = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    body: JSON.stringify({ model, max_tokens: 16000, system: NOTES_SYSTEM,
+      messages: [{ role: 'user', content: `Deal details:\n${header}\n\nCall: ${title || 'sales call'}\n\nTranscript:\n${transcript.slice(0, 180000)}` }] }),
+  })
+  const j: any = await r.json().catch(() => ({}))
+  if (!r.ok) return { status: 502, body: { error: `Claude answered ${r.status}: ${(j.error?.message || '').slice(0, 200)}` } }
+  const notes = (j.content || []).map((c: any) => c.text || '').join('').trim()
+  const out = { ok: true, notes, title, transcript_chars: transcript.length, model, stop_reason: j.stop_reason, output_tokens: j.usage?.output_tokens, blocks: (j.content || []).map((c: any) => c.type) }
+  await log(admin, who, 'call_notes', { company: deal.company, email: deal.email, fathom_url: body.fathom_url }, true, { title, chars: transcript.length, model, stop_reason: j.stop_reason, output_tokens: j.usage?.output_tokens })
+  return { status: 200, body: out }
+}
+
+// Drop the notes into the client's Slack channel. The bot must be a member;
+// channels it made itself are fine, hand-made ones need it added.
+async function postNotes(admin: any, who: Caller, body: any) {
+  const token = Deno.env.get('SLACK_BOT_TOKEN') || ''
+  if (!token) return { status: 500, body: { error: 'SLACK_BOT_TOKEN is not set' } }
+  const name = String(body.channel || '').replace(/^#/, '').trim().toLowerCase()
+  const text = String(body.text || '').trim()
+  if (!name || !text) return { status: 400, body: { error: 'channel and text are required' } }
+  let cursor = '', id = ''
+  for (let page = 0; page < 10 && !id; page++) {
+    const q = new URLSearchParams({ types: 'private_channel,public_channel', exclude_archived: 'true', limit: '1000' })
+    if (cursor) q.set('cursor', cursor)
+    const r = await fetch(`https://slack.com/api/conversations.list?${q}`, { headers: { Authorization: `Bearer ${token}` } })
+    const j: any = await r.json()
+    if (!j.ok) return { status: 502, body: { error: `Slack: ${j.error}` } }
+    id = (j.channels || []).find((c: any) => c.name === name)?.id || ''
+    cursor = j.response_metadata?.next_cursor || ''
+    if (!cursor) break
+  }
+  if (!id) return { status: 404, body: { error: `#${name} was not found among the channels the bot can see. Make the channel, add @Optimus to it, then post again, or copy the notes in by hand.` } }
+  const r = await fetch('https://slack.com/api/chat.postMessage', {
+    method: 'POST', headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json; charset=utf-8' },
+    body: JSON.stringify({ channel: id, text: `*Post-call notes* (from ${who.name})\n\n${text}`, unfurl_links: false }),
+  })
+  const j: any = await r.json()
+  if (!j.ok) return { status: 502, body: { error: j.error === 'not_in_channel' ? `The bot is not in #${name}. Add @Optimus to the channel and post again, or copy the notes in by hand.` : `Slack: ${j.error}` } }
+  const out = { ok: true, channel_id: id, ts: j.ts }
+  await log(admin, who, 'post_notes', { company: body.company, email: body.email }, true, { channel: name, ts: j.ts })
+  return { status: 200, body: out }
+}
+
 // ── entry ───────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -526,6 +674,8 @@ serve(async (req) => {
       case 'payment_check': out = await paymentCheck(admin, body); break
       case 'ghl_search': out = await ghlSearch(body); break
       case 'deal_status': out = await dealStatus(body); break
+      case 'call_notes': out = await callNotes(admin, who, body); break
+      case 'post_notes': out = await postNotes(admin, who, body); break
       case 'client_card': out = await clientCard(body); break
       case 'ghl_move': out = await ghlMove(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
@@ -537,7 +687,7 @@ serve(async (req) => {
     // A failed action is logged too, so the error a closer saw can be found
     // afterwards (13 Sep 2026: "it was giving me a PandaDoc API error", and
     // the log held only successes).
-    if (out.status >= 400 && ['create_contract', 'send_contract', 'make_channel', 'stripe_link', 'ghl_move'].includes(body.action)) {
+    if (out.status >= 400 && ['create_contract', 'send_contract', 'make_channel', 'stripe_link', 'ghl_move', 'call_notes', 'post_notes'].includes(body.action)) {
       await log(admin, who, body.action, body, false, { status: out.status, ...out.body })
     }
     return reply(out.status, out.body)
