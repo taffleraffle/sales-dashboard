@@ -225,7 +225,7 @@ export default function SalesChatWidget() {
       {!open && (
         <button
           onClick={() => setOpen(true)}
-          className="fixed right-0 top-1/2 -translate-y-1/2 z-[60] bg-opt-yellow text-text-primary rounded-l-xl px-1.5 py-3 shadow-[0_0_20px_rgba(212,245,12,0.2)] hover:shadow-[0_0_30px_rgba(212,245,12,0.4)] hover:px-2.5 transition-all"
+          className="fixed right-0 bottom-24 sm:bottom-auto sm:top-1/2 sm:-translate-y-1/2 z-[60] bg-opt-yellow text-text-primary rounded-l-xl px-1.5 py-3 shadow-[0_0_20px_rgba(212,245,12,0.2)] hover:shadow-[0_0_30px_rgba(212,245,12,0.4)] hover:px-2.5 transition-all"
           title="Sales Intelligence"
         >
           <MessageSquare size={18} />

@@ -236,6 +236,19 @@ function ReferralCard({ item: r, onClose, copy }) {
   // scan found for the same site or phone (stored on the referral as gmbs).
   // One row per profile, matched on the Google CID.
   const cidOf = (u) => { try { return new URL(u).searchParams.get('cid') || '' } catch { return '' } }
+  // "+1210-796-5286" -> "+1 210-796-5286"; "+61870819282" -> "+61 8 7081 9282"
+  const fmtPhone = (ph) => {
+    const d = String(ph || '').replace(/[^0-9+]/g, '')
+    let m = d.match(/^\+1(\d{3})(\d{3})(\d{4})$/)
+    if (m) return `+1 ${m[1]}-${m[2]}-${m[3]}`
+    m = d.match(/^\+61(1[38]00)(\d{3})(\d{3})$/)
+    if (m) return `${m[1]} ${m[2]} ${m[3]}`
+    m = d.match(/^\+61(4\d{2})(\d{3})(\d{3})$/)
+    if (m) return `+61 ${m[1]} ${m[2]} ${m[3]}`
+    m = d.match(/^\+61(\d)(\d{4})(\d{4})$/)
+    if (m) return `+61 ${m[1]} ${m[2]} ${m[3]}`
+    return ph
+  }
   const localPhone = (ph) => { const d = String(ph || '').replace(/[^0-9+]/g, ''); return !d.startsWith('+') || d.startsWith(r.region === 'au' ? '+61' : r.region === 'nz' ? '+64' : '+1') }
   const scanned = r.gmbs || []
   const gmbs = (() => {
@@ -302,15 +315,17 @@ function ReferralCard({ item: r, onClose, copy }) {
           {gmbs.map((g, i) => (
             <Row key={g.url || g.name} first={i === 0}>
               <GoogleMark />
-              <div className="min-w-0 flex-1">
-                <div style={{ fontWeight: 600 }} className="truncate">{g.name}</div>
-                <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[g.address, g.rating ? `${g.rating} stars from ${g.reviews || 0} reviews` : g.reviews === 0 ? 'no reviews yet' : '', g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type, g.found ? 'found on Google, not on record' : '', g.gone ? 'not showing on Google at the last scan' : ''].filter(Boolean).join(' · ')}</div>
+              <div className="min-w-0" style={{ flex: '1 1 220px' }}>
+                <div style={{ fontWeight: 600, lineHeight: 1.3 }}>{g.name}</div>
+                <div style={{ fontSize: 12, color: 'var(--ink-4)', lineHeight: 1.4, marginTop: 2 }}>{[g.address, g.rating ? `${g.rating} stars from ${g.reviews || 0} reviews` : g.reviews === 0 ? 'no reviews yet' : '', g.type === 'cloud' ? 'added profile' : g.type === 'regular' ? 'their own' : g.type, g.found ? 'found on Google, not on record' : '', g.gone ? 'not showing on Google at the last scan' : ''].filter(Boolean).join(' · ')}</div>
               </div>
-              {g.status && <span className={`pill ${g.status === 'active' ? 'pill-up' : 'pill-soft'}`}>{g.status}</span>}
-              {g.phone && (localPhone(g.phone)
-                ? <a href={`tel:${g.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={small} title={`Call this listing: ${g.phone}`}><Phone size={ICON.sm} /> {g.phone}</a>
-                : <span style={{ fontSize: 12, color: 'var(--house-warn)' }} title="The number on this Google listing is not a local one. Fix it in the profile.">Listing phone is overseas: {g.phone}</span>)}
-              {g.url && <a href={g.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Maps <ExternalLink size={ICON.sm} /></a>}
+              <div className="flex items-center gap-2 flex-wrap w-full sm:w-auto pl-10 sm:pl-0">
+                {g.status && <span className={`pill ${g.status === 'active' ? 'pill-up' : 'pill-soft'}`}>{g.status}</span>}
+                {g.phone && (localPhone(g.phone)
+                  ? <a href={`tel:${g.phone.replace(/[^0-9+]/g, '')}`} className="editorial-btn-ghost" style={small} title={`Call this listing: ${g.phone}`}><Phone size={ICON.sm} /> {fmtPhone(g.phone)}</a>
+                  : <span style={{ fontSize: 12, color: 'var(--house-warn)' }} title="The number on this Google listing is not a local one. Fix it in the profile.">Listing phone is overseas: {g.phone}</span>)}
+                {g.url && <a href={g.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Maps <ExternalLink size={ICON.sm} /></a>}
+              </div>
             </Row>
           ))}
         </Section>
@@ -325,7 +340,7 @@ function ReferralCard({ item: r, onClose, copy }) {
               ) : null}
               <div className="flex items-center gap-3 flex-wrap" style={{ marginTop: 8, fontSize: 13 }}>
                 <Icon><Video size={14} /></Icon>
-                <span style={{ flex: 1, minWidth: 0 }} className="truncate">{v.title || v.url.replace(/^https?:\/\//, '')}</span>
+                <span style={{ flex: '1 1 160px', minWidth: 0, lineHeight: 1.4, overflowWrap: 'anywhere' }}>{v.title || v.url.replace(/^https?:\/\//, '')}</span>
                 <a href={v.url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={small}>Open <ExternalLink size={ICON.sm} /></a>
                 <button type="button" className="editorial-btn-ghost" style={small} onClick={() => copy(v.url)} title="Copy the link to send to a prospect"><Copy size={ICON.sm} /></button>
               </div>
@@ -517,9 +532,9 @@ const STEPS = [
    opens it. Ben, 12 Sep 2026: "just have one calendar link ... merge those". */
 function LinkButton({ label, url, copy, primary }) {
   return (
-    <span className="inline-flex items-center">
-      <button type="button" className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 32, fontSize: 12.5, borderTopRightRadius: 0, borderBottomRightRadius: 0 }} onClick={() => copy(url)} title="Copy the link for the client">
-        <Copy size={ICON.sm} /> {label}
+    <span className="inline-flex items-center" style={{ maxWidth: '100%' }}>
+      <button type="button" className={primary ? 'editorial-btn-primary' : 'editorial-btn-ghost'} style={{ height: 32, fontSize: 12.5, borderTopRightRadius: 0, borderBottomRightRadius: 0, minWidth: 0, maxWidth: 'calc(100% - 34px)', overflow: 'hidden' }} onClick={() => copy(url)} title="Copy the link for the client">
+        <Copy size={ICON.sm} style={{ flex: 'none' }} /> <span className="truncate">{label}</span>
       </button>
       <a href={url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5, padding: '0 9px', borderTopLeftRadius: 0, borderBottomLeftRadius: 0, marginLeft: -1 }} title="Open it"><ExternalLink size={ICON.sm} /></a>
     </span>
@@ -920,7 +935,7 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                 </div>
                 {n?.info && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-2)' }}>{n.info}</div>}
                 {key === 'notes' && notesOpen && (
-                  <div className="grid gap-3 mt-3" style={{ padding: '14px 16px', border: '1px solid var(--rule)', borderRadius: 'var(--house-radius-tile)', background: 'var(--paper-2)' }}>
+                  <div className="grid gap-3 mt-3 -ml-[34px] sm:ml-0" style={{ padding: '14px 16px', border: '1px solid var(--rule)', borderRadius: 'var(--house-radius-tile)', background: 'var(--paper-2)' }}>
                     <Field label="Fathom share link, or the transcript" hint="Paste the Fathom link from the call. The notes follow Ben's template: personality, past experience, concerns, goals, priorities with the trial scope and the post-trial roadmap, and any gaps to fill before the onboarding call.">
                       <textarea rows={notesSrc.length > 300 ? 6 : 2} value={notesSrc} onChange={(e) => setNotesSrc(e.target.value)} placeholder="https://fathom.video/share/..." style={{ fontSize: 13 }} />
                     </Field>
