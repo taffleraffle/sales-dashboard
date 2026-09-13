@@ -415,6 +415,16 @@ async function dealStatus(body: any) {
   return { status: r.ok ? 200 : (r.status || 502), body: out }
 }
 
+// A referral's card from the client dashboard: contact, website, every GMB.
+async function clientCard(body: any) {
+  const key = Deno.env.get('AGENT_WEBHOOK_KEY') || ''
+  if (!key) return { status: 500, body: { error: 'AGENT_WEBHOOK_KEY is not set' } }
+  const q = new URLSearchParams({ company: (body.company || '').trim(), email: (body.email || '').trim().toLowerCase() })
+  const r = await fetch(`${DASHBOARD_BASE}/webhooks/agent/client-card?${q}`, { headers: { 'X-Webhook-Key': key } })
+  const out = await r.json().catch(() => ({ error: `dashboard answered ${r.status}` }))
+  return { status: r.ok ? 200 : (r.status || 502), body: out }
+}
+
 // ── entry ───────────────────────────────────────────────────────────────────
 
 serve(async (req) => {
@@ -450,6 +460,7 @@ serve(async (req) => {
       case 'payment_check': out = await paymentCheck(admin, body); break
       case 'ghl_search': out = await ghlSearch(body); break
       case 'deal_status': out = await dealStatus(body); break
+      case 'client_card': out = await clientCard(body); break
       case 'ghl_move': out = await ghlMove(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
