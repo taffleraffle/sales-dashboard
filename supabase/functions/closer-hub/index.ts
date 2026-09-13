@@ -205,12 +205,19 @@ async function createContract(admin: any, who: Caller, body: any) {
         { email: optEmail, first_name: optFirst, last_name: optLast, role: 'Closer' },
         { email, first_name: cFirst, last_name: cLast, role: 'Client' },
       ],
-      fields: { ClientName: { value: company }, MonthlyFee: { value: fee }, ExecutionDate: { value: new Date().toISOString().slice(0, 10) },
-        OptRepName: { value: optRep }, ...(conditions ? { SpecialConditions: { value: conditions } } : {}) },
+      // PandaDoc insists every tag in the file is declared here, the client's
+      // own fields and both signature boxes included, or processing fails.
+      fields: {
+        ClientName: { value: company, role: 'Closer' }, MonthlyFee: { value: fee, role: 'Closer' },
+        SpecialConditions: { value: conditions || '', role: 'Closer' }, OptRepName: { value: optRep, role: 'Closer' },
+        OptSignature: { role: 'Closer' },
+        ExecutionDate: { value: new Date().toISOString().slice(0, 10), role: 'Client' },
+        AuthorisedName: { value: '', role: 'Client' }, ClientSignature: { role: 'Client' },
+      },
       parse_form_fields: false,
     })
     const result = { ok: true, doc_id: out.id, status: out.status, renamed: out.renamed, offer, fee, conditions, name: docName, template,
-      template_name: 'Local SEO Client Agreement (AUD)', fields_sent: Object.keys(out.fields || {}),
+      template_name: 'Local SEO Client Agreement (AUD)', fields_sent: ['ClientName', 'MonthlyFee', 'ExecutionDate', 'OptRepName'].concat(conditions ? ['SpecialConditions'] : []),
       url: `https://app.pandadoc.com/a/#/documents/${out.id}`, client_email: email, opt_signer: optEmail, opt_signer_name: optRep }
     await log(admin, who, 'create_contract', body, true, result)
     return { status: 200, body: result }
