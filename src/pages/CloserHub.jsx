@@ -407,6 +407,16 @@ function SidePanel({ settings, copy, isAdmin, onSaved, dealRegion }) {
 /* ── The deal as a checklist ───────────────────────────────────────────── */
 
 const slugOf = (name) => String(name || '').toLowerCase().normalize('NFKD').replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 73)
+// The agreements the hub knows by purpose, in the order the picker shows them.
+// Which one is the default comes from the deal type and the region; the raw
+// PandaDoc name sits in brackets so admins can tell them apart. Ben, 13 Sep
+// 2026: "How do I know which one is what in this dropdown".
+const CONFIGURED = [
+  ['template_retainer', 'Retainer, USD (USA and NZ)'],
+  ['template_retainer_au', 'Retainer, AUD (Australia)'],
+  ['template_trial', 'Trial, USD (USA and NZ)'],
+  ['template_trial_au', 'Trial, AUD (Australia)'],
+]
 const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '', fee: '', extra: '', signer: '', region: 'us' }
 const REGIONS = [['us', 'USA'], ['au', 'AU'], ['nz', 'NZ']]
 const regionOf = (country) => { const c = String(country || '').toUpperCase(); return c === 'AU' || c === 'AUSTRALIA' ? 'au' : c === 'NZ' || c === 'NEW ZEALAND' ? 'nz' : 'us' }
@@ -700,10 +710,17 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
               {REGIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
-          <Field label="Contract template">
+          <Field label="Contract template" hint={form.template && !CONFIGURED.some(([k]) => settings[k] === form.template) ? 'A template picked by hand from PandaDoc.' : 'Picked from the deal type and region. Change it only if you know why.'}>
             <select value={form.template} onChange={set('template')}>
               <option value="">Pick one</option>
-              {templates.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+              {CONFIGURED.filter(([k]) => settings[k]).map(([k, label]) => (
+                <option key={k} value={settings[k]}>{label}{templates.find(t => t.id === settings[k]) ? ` (${templates.find(t => t.id === settings[k]).name.trim()})` : ''}</option>
+              ))}
+              {templates.filter(t => !CONFIGURED.some(([k]) => settings[k] === t.id)).length > 0 && (
+                <optgroup label="Other templates in PandaDoc">
+                  {templates.filter(t => !CONFIGURED.some(([k]) => settings[k] === t.id)).map(t => <option key={t.id} value={t.id}>{t.name.trim()}</option>)}
+                </optgroup>
+              )}
             </select>
           </Field>
           <Field label="Signing for OPT">
