@@ -136,7 +136,18 @@ async function templateShape(templateId: string) {
   const clientRole = roles.find((r) => r.toLowerCase() === 'client') || roles.find((r) => r === 'Role 2') || roles[roles.length - 1] || ''
   const optRole = roles.find((r) => r !== clientRole) || ''
   const fields = new Set<string>((d.fields || []).map((f: any) => f.merge_field || f.name).filter(Boolean))
-  return { roles, clientRole, optRole, fields, name: d.name || '' }
+  // Signature boxes per role. PandaDoc's details answer assigns a field to a
+  // role by id, so map the id back to the name.
+  const roleName: Record<string, string> = {}
+  for (const r of d.roles || []) roleName[r.id] = r.name
+  const signatures: Record<string, number> = {}
+  for (const f of d.fields || []) {
+    if (f.type !== 'signature') continue
+    const a = f.assigned_to || {}
+    const name = a.role_name || roleName[a.id] || a.name || '?'
+    signatures[name] = (signatures[name] || 0) + 1
+  }
+  return { roles, clientRole, optRole, fields, signatures, name: d.name || '' }
 }
 
 // Upload one of our tagged Word files to PandaDoc as a new document. The
@@ -223,6 +234,14 @@ async function createContract(admin: any, who: Caller, body: any) {
     return { status: 200, body: result }
   }
   const shape = await templateShape(template)
+  // A contract one side cannot sign is not a contract. Ben's hand-made AU
+  // template (13 Sep) had only the client's signature box; say so plainly
+  // rather than send it.
+  const missing = [
+    ...(shape.clientRole && !shape.signatures[shape.clientRole] ? ['the client'] : []),
+    ...(shape.optRole && !shape.signatures[shape.optRole] ? ['OPT'] : []),
+  ]
+  if (missing.length) return { status: 400, body: { error: `The template "${shape.name.trim()}" has no signature box for ${missing.join(' or ')} (roles ${shape.roles.join(' / ')}). Add one in PandaDoc's template editor, or pick another template.`, code: 'no_signature_box', signatures: shape.signatures } }
   const wanted: Record<string, { value: string }> = {
     ClientName: { value: company },
     MonthlyFee: { value: fee },
