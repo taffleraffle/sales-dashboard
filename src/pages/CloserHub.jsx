@@ -43,7 +43,7 @@ const SETTING_FIELDS = [
   ['stripe_currency', 'Stripe currency', 'usd or aud. Used only for the Stripe fallback link.'],
   ['onboarding_page_url', 'Onboarding page link', 'The welcome page the client lands on.'],
   ['onboarding_calendar_url', 'Onboarding calendar link', 'Where the onboarding call is booked.'],
-  ['notes_summariser_url', 'Call summariser link', 'The ChatGPT or Claude summariser used for post-call notes.'],
+  ['notes_model', 'Notes model', 'The Claude model that writes the post-call notes. Default claude-opus-5.'],
   ['ghl_location_id', 'GoHighLevel location id', 'Lets the checklist open the contact card directly.'],
   ['send_subject', 'Email subject when sending', ''],
   ['send_message', 'Email message when sending', ''],
@@ -495,6 +495,9 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
   const [q, setQ] = useState('')
   const [hits, setHits] = useState(null)
   const [contact, setContact] = useState(null)   // the GoHighLevel contact picked in step 1
+  const [notesOpen, setNotesOpen] = useState(false)
+  const [notesSrc, setNotesSrc] = useState('')
+  const [notes, setNotes] = useState('')
   const set = (k) => (e) => setForm(f => ({ ...f, [k]: e.target.value }))
   const d = deal?.data || {}
   const ticks = deal?.ticks || {}
@@ -585,6 +588,23 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
     setContact(c); setHits(null); setQ('')
     setForm(f => ({ ...f, company: c.company || f.company || c.name, email: c.email || f.email, name: c.name || f.name, region: c.country ? regionOf(c.country) : f.region }))
   }
+
+  const writeNotes = () => run('notes', async () => {
+    const src = notesSrc.trim()
+    const isLink = /^https?:\/\//.test(src) && src.length < 300
+    const c = d.ghl_contact || contact || {}
+    const r = await callCloserHub('call_notes', { ...(isLink ? { fathom_url: src } : { transcript: src }),
+      deal: { company: form.company, name: form.name, email: form.email, phone: c.phone || '', website: c.website || '', offer: form.offer, closer: signer?.name || '' } })
+    setNotes(r.notes || '')
+    await record('notes', { ...(d.notes || {}), title: r.title, written_at: new Date().toISOString(), chars: r.transcript_chars, text: r.notes || '' })
+    setNote(n => ({ ...n, notes: { ok: `Notes written${r.title ? ` from "${r.title}"` : ''}. Read them, fix anything, then copy or post.` } }))
+  })
+  const postNotes = () => run('post', async () => {
+    const channel = `opt-${slugOf(form.company)}`
+    const r = await callCloserHub('post_notes', { channel, text: notes, company: form.company, email: form.email })
+    await save({ data: { ...d, notes: { ...(d.notes || {}), text: notes, posted_ts: r.ts, channel } }, ticks: { ...ticks, notes: true } })
+    setNote(n => ({ ...n, notes: { ok: `Posted to #${channel}.` } })); toast.success(`Posted to #${channel}.`)
+  })
 
   // ── automations ──
   const copy = async (text) => { try { await navigator.clipboard.writeText(text); toast.success('Copied.') } catch { toast.error('Copy blocked, select it by hand.') } }
@@ -817,15 +837,28 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                   )}
                   {key === 'notes' && (
                     <>
-                      {settings.notes_summariser_url
-                        ? <a href={settings.notes_summariser_url} target="_blank" rel="noopener" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }}>Call summariser <ExternalLink size={ICON.sm} /></a>
-                        : <span style={{ fontSize: 12.5, color: 'var(--house-warn)' }}>Summariser link not set. Admin adds it in Hub settings.</span>}
+                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={() => { setNotesOpen(v => !v); if (!notes && d.notes?.text) setNotes(d.notes.text) }}>{notesOpen ? 'Hide the notes tool' : d.notes ? 'Open the notes' : 'Write the notes'}</button>
                       <a href="https://app.slack.com/" target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open Slack <ExternalLink size={ICON.sm} /></a>
                     </>
                   )}
                   {key === 'eod' && <Link to="/sales/eod" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open End of Day</Link>}
                 </div>
                 {n?.info && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--ink-2)' }}>{n.info}</div>}
+                {key === 'notes' && notesOpen && (
+                  <div className="grid gap-3 mt-3" style={{ padding: '14px 16px', border: '1px solid var(--rule)', borderRadius: 'var(--house-radius-tile)', background: 'var(--paper-2)' }}>
+                    <Field label="Fathom share link, or the transcript" hint="Paste the Fathom link from the call. The notes follow Ben's template: personality, past experience, concerns, goals, priorities with the trial scope and the post-trial roadmap, and any gaps to fill before the onboarding call.">
+                      <textarea rows={notesSrc.length > 300 ? 6 : 2} value={notesSrc} onChange={(e) => setNotesSrc(e.target.value)} placeholder="https://fathom.video/share/..." style={{ fontSize: 13 }} />
+                    </Field>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <button type="button" className="editorial-btn-primary" style={{ height: 32, fontSize: 12.5 }} onClick={writeNotes} disabled={busy === 'notes' || !notesSrc.trim()}>{busy === 'notes' ? 'Reading the call, about a minute' : notes ? 'Write them again' : 'Write the notes'}</button>
+                      {notes && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={() => copy(notes)}><Copy size={ICON.sm} /> Copy notes</button>}
+                      {notes && <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={postNotes} disabled={busy === 'post'}>{busy === 'post' ? 'Posting' : `Post to #opt-${slugOf(form.company)}`}</button>}
+                    </div>
+                    {notes && (
+                      <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={Math.min(40, Math.max(12, notes.split('\n').length + 2))} style={{ fontSize: 13, lineHeight: 1.5, fontFamily: 'inherit', background: '#fff' }} />
+                    )}
+                  </div>
+                )}
                 {n?.ok && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-good)' }}>{n.ok}</div>}
                 {n?.warn && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-warn)' }}>{n.warn}</div>}
                 {n?.bad && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-bad)' }}>{n.bad}</div>}
