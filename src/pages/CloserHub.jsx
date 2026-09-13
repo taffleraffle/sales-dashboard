@@ -200,15 +200,17 @@ function PaymentLinks({ settings, copy, dealRegion }) {
 /* The referral's logo: its site's favicon through Google's lookup service,
    so an admin can add a referral and it gets a logo with no build step.
    Letters if the site has none. Ben, 12 Sep 2026. */
-function SiteLogo({ website, name }) {
-  const [broken, setBroken] = useState(false)
+function SiteLogo({ website, name, logo }) {
+  // 0 = the referral's own logo, 1 = Google's favicon lookup, 2 = letters.
+  const [step, setStep] = useState(logo ? 0 : 1)
   let host = ''
   try { host = new URL(/^https?:/.test(website || '') ? website : `https://${website || ''}`).hostname } catch { host = '' }
   const box = { width: 30, height: 30, borderRadius: 9, flex: 'none', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }
-  if (host && !broken) {
+  const src = step === 0 && logo ? logo : step <= 1 && host ? `https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64` : ''
+  if (src) {
     return (
       <span style={{ ...box, background: '#fff', border: '1px solid var(--rule)' }}>
-        <img src={`https://www.google.com/s2/favicons?domain=${encodeURIComponent(host)}&sz=64`} alt="" width={20} height={20} style={{ width: 20, height: 20, objectFit: 'contain', display: 'block' }} onError={() => setBroken(true)} />
+        <img src={src} alt="" width={22} height={22} style={{ width: 22, height: 22, objectFit: 'contain', display: 'block' }} onError={() => setStep(v => (v === 0 && host ? 1 : 2))} />
       </span>
     )
   }
@@ -376,7 +378,7 @@ function CaseStudies({ settings, copy, isAdmin, onSaved, dealRegion }) {
           {/* The whole row opens the card (Ben, 13 Sep 2026: "hover over this whole thing"). */}
           <button type="button" className="house-plain tile-hover min-w-0 flex-1" style={{ background: 'none', border: 0, padding: '10px 8px', margin: '2px -8px', borderRadius: 12, textAlign: 'left', cursor: 'pointer', color: 'inherit', fontSize: 13 }} onClick={() => setOpen(c)} title="Open their card">
             <div className="flex items-center gap-3">
-              <SiteLogo website={c.website} name={c.name} />
+              <SiteLogo website={c.website} name={c.name} logo={c.logo} />
               <div className="min-w-0 flex-1">
                 <div style={{ fontWeight: 600 }} className="truncate">{c.name}</div>
                 {(c.contact || c.location) && <div style={{ fontSize: 12, color: 'var(--ink-4)' }} className="truncate">{[c.contact, c.location].filter(Boolean).join(' · ')}</div>}
