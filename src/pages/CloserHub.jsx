@@ -424,9 +424,10 @@ const BLANK = { company: '', email: '', name: '', offer: 'retainer', template: '
 /* What the chosen agreement is, in words. Ben, 14 Sep 2026: "when I select a
    contract, how do I know which contract is which?" */
 const WHAT = {
-  retainer: 'The month-to-month Local SEO client agreement. Company, monthly fee, special conditions and both names fill from this card; the client signs, then OPT countersigns.',
-  trial: 'The two-week Local Surge trial agreement. Company, trial fee and both names fill from this card.',
+  retainer: 'The month-to-month Local SEO client agreement.',
+  trial: 'The two-week Local Surge trial agreement.',
 }
+const FILLS = [['ClientName', 'company'], ['MonthlyFee', 'fee'], ['SpecialConditions', 'special conditions'], ['OptRepName', 'OPT signer name'], ['ExecutionDate', 'date']]
 function TemplateNote({ id, templates, settings, region }) {
   if (!id) return null
   const key = CONFIGURED.find(([k]) => settings[k] === id)?.[0] || ''
@@ -435,21 +436,25 @@ function TemplateNote({ id, templates, settings, region }) {
   const kind = key.startsWith('template_trial') ? 'trial' : key.startsWith('template_retainer') ? 'retainer' : ''
   const currency = key ? (isAu ? 'AUD' : 'USD') : ''
   const fee = kind ? ((region === 'au' || isAu ? settings[`fee_${kind}_au`] : '') || settings[`fee_${kind}`] || '') : ''
-  const sig = t?.signatures || {}
-  const signers = Object.keys(sig)
   const missing = t?.missing || []
   const line = { display: 'flex', gap: 8, fontSize: 12.5, lineHeight: 1.45 }
   const k = { color: 'var(--ink-3)', flex: 'none', width: 74 }
   return (
     <div className="grid gap-1" style={{ padding: '10px 12px', border: '1px solid var(--rule)', borderRadius: 10, background: 'var(--paper-2)', marginTop: 6 }}>
       <div style={line}><span style={k}>What it is</span><span>{kind ? WHAT[kind] : 'A template picked by hand from PandaDoc. Check what it contains before you send it.'}</span></div>
+      {t?.fields && (() => {
+        const fills = FILLS.filter(([f]) => t.fields.includes(f)).map(([, w]) => w)
+        return <div style={line}><span style={k}>Fills in</span>{fills.length ? <span>{fills.join(', ')}, from this card.</span> : <span style={{ color: 'var(--house-warn)' }}>Nothing fills in automatically. Open the draft in PandaDoc and fill it in before you send it.</span>}</div>
+      })()}
       {currency && <div style={line}><span style={k}>Currency</span><span>{currency}{fee ? `, ${currency} ${Number(fee).toLocaleString()} ${kind === 'trial' ? 'for the trial' : 'a month'} if the fee is left blank` : ', no default fee set in Hub settings'}{isAu ? '. For Australian deals.' : '. For USA and New Zealand deals.'}</span></div>}
       <div style={line}><span style={k}>Where</span><span>{t?.kind === 'file' ? "OPT's own Word file, uploaded to PandaDoc for each deal. Same text as the V1 retainer with AUD in the Fees line." : t ? <>PandaDoc template {`"${t.name.trim()}"`}. <a href={t.url} target="_blank" rel="noopener" style={{ textDecoration: 'underline' }}>Open it in PandaDoc <ExternalLink size={ICON.sm} /></a></> : 'PandaDoc template.'}</span></div>
       {t && (
         <div style={line}><span style={k}>Who signs</span>
-          {missing.length
-            ? <span style={{ color: 'var(--house-warn)' }}>No signature box for {missing.join(' or ')}. The hub will not draft from this until it is added in the PandaDoc template editor.</span>
-            : <span>{signers.length ? signers.map(r => `${sig[r]} box for ${r === 'Closer' || r === 'Role 1' ? `OPT (${r})` : r === 'Client' || r === 'Role 2' ? `the client (${r})` : r}`).join(', ') : 'Signature boxes not read yet.'}</span>}
+          {missing.includes('the client')
+            ? <span style={{ color: 'var(--house-warn)' }}>No signature box for the client. The hub will not draft from this until one is added in the PandaDoc template editor.</span>
+            : missing.includes('OPT')
+              ? <span>The client signs. There is no OPT signature box on this one.</span>
+              : <span>The client signs, then OPT countersigns.</span>}
         </div>
       )}
     </div>
@@ -767,17 +772,14 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
               {REGIONS.map(([v, l]) => <option key={v} value={v}>{l}</option>)}
             </select>
           </Field>
-          <Field label="Contract template" hint="Picked from the deal type and region. The note below says what it is.">
+          <Field label="Contract" hint="Picked from the deal type and region. The note below says what it is.">
             <select value={form.template} onChange={set('template')}>
               <option value="">Pick one</option>
-              {CONFIGURED.filter(([k]) => settings[k]).map(([k, label]) => (
-                <option key={k} value={settings[k]}>{label}{templates.find(t => t.id === settings[k])?.kind === 'file' ? ' (our Word file)' : templates.find(t => t.id === settings[k]) ? ` (PandaDoc: ${templates.find(t => t.id === settings[k]).name.trim()})` : ''}</option>
-              ))}
-              {templates.filter(t => !CONFIGURED.some(([k]) => settings[k] === t.id)).length > 0 && (
-                <optgroup label="Other templates in PandaDoc">
-                  {templates.filter(t => !CONFIGURED.some(([k]) => settings[k] === t.id)).map(t => <option key={t.id} value={t.id}>{t.name.trim()}{t.missing?.length ? ` (no signature box for ${t.missing.join(' or ')})` : ''}</option>)}
-                </optgroup>
-              )}
+              {CONFIGURED.filter(([k]) => settings[k]).map(([k]) => {
+                const t = templates.find(x => x.id === settings[k])
+                return <option key={k} value={settings[k]}>{t ? t.name.trim() : settings[k]}</option>
+              })}
+              {templates.filter(t => !CONFIGURED.some(([k]) => settings[k] === t.id)).map(t => <option key={t.id} value={t.id}>{t.name.trim()}</option>)}
             </select>
             <TemplateNote id={form.template} templates={templates} settings={settings} region={form.region} />
           </Field>
