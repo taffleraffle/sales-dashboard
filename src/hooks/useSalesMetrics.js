@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { useRegion, audienceInRegion, isAuCalendlyBooking } from '../lib/region'
+import { useRegion, audienceInRegion } from '../lib/region'
 import { dateRangeBoundsET } from '../lib/dateUtils'
 
 /*
@@ -173,36 +173,56 @@ async function load(range, region = 'all') {
 
   // ── Per-closer calendar bookings (booking -> appointment -> closer) ──
   const bookingExcludedIds = new Set(bookingExcluded.map(b => b.booking_id))
-  // Belt and braces: migration 172 marks test bookings as spam in the view; keep the name guard here too
-  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && !/opt digital/i.test(b.contact_name || '') && inRegion(b.audience))
+  // Same test-booking rule as the view (migration 181) and the Marketing page:
+  // "<name> and OPT Digital" is how a REAL booking is titled when the host
+  // shows as OPT Digital. Only that title with no email at all is a test. The
+  // old blanket name guard here dropped real prospects from the Booked list
+  // and the per-closer credit while the tile still counted them (Ben, 14 Sep
+  // 2026: US 30d tile 155, list 102; 15 of the 53 hidden had gone live).
+  const isTestBooking = (b) => /\bopt digital\b/i.test(b.contact_name || '') && !String(b.contact_email || '').trim()
+  const goodBookings = bookings.filter(b => !b.is_dq && !b.is_spam && !bookingExcludedIds.has(b.id) && !isTestBooking(b) && inRegion(b.audience))
+  // A booking is credited to the closer who TOOK the call: whoever logged a
+  // call against its event id on an EOD (latest report wins). Only while no
+  // call has been logged does it fall back to whose calendar it sits on (the
+  // GHL appointment's closer, or the Calendly host for Australian bookings).
+  // Ben, 14 Sep 2026: calendar owner is not who runs the call. Ash took 20 of
+  // the Australian calls booked on Ben's and Daniel's Calendly links, and Ben
+  // took 17 US calls on Ahmad's and Daniel's calendars, so Ben showed 21 AU
+  // bookings against 1 live call and 0 US bookings against 15.
+  // goodBookings already carries the Calendly rows (migration 175 unions them
+  // into the view with the invitee URI as ghl_event_id), so both sources get
+  // the same DQ, spam, exclusion and region rules as the tile.
   const bookingsByCloser = {}
-  const eventIds = goodBookings.map(b => b.ghl_event_id).filter(Boolean)
+  const eventIds = [...new Set(goodBookings.map(b => b.ghl_event_id).filter(Boolean))]
+  const takerByEvent = {}, ownerByEvent = {}
+  const { data: team, error: teamErr } = await supabase.from('team_members').select('id, email')
+  if (teamErr) problems.push(`team: ${teamErr.message}`)
+  const idByEmail = Object.fromEntries((team || []).filter(t => t.email).map(t => [t.email.toLowerCase(), t.id]))
   for (let i = 0; i < eventIds.length; i += 200) {
     const slice = eventIds.slice(i, i + 200)
-    const { data, error } = await supabase.from('ghl_appointments').select('ghl_event_id, closer_id').in('ghl_event_id', slice)
-    if (error) { problems.push(`appointments: ${error.message}`); break }
-    for (const a of (data || [])) if (a.closer_id) bookingsByCloser[a.closer_id] = (bookingsByCloser[a.closer_id] || 0) + 1
-  }
-  // Calendly bookings (the Australian strategy call) never reach GoHighLevel,
-  // so they attach to the closer who HOSTS the Calendly event, matched by
-  // email. Ben, 13 Sep 2026: Ash's calls were on the dashboard but on nobody's
-  // calendar. Same booked-at window as the calendar bookings above.
-  if (inRegion('Australia')) {
-    const [{ data: hosts, error: hostErr }, { data: cal, error: calErr }] = await Promise.all([
-      supabase.from('team_members').select('id, email'),
-      supabase.from('calendly_bookings').select('host_email, invitee_name, status, event_name, event_type_uri').gte('booked_at', startStr).lte('booked_at', endStr).eq('status', 'active'),
+    const calendlySlice = slice.filter(id => id.startsWith('https://api.calendly.com/'))
+    const [taken, appts, cal] = await Promise.all([
+      supabase.from('closer_calls').select('ghl_event_id, closer_eod_reports(closer_id, report_date)').in('ghl_event_id', slice),
+      supabase.from('ghl_appointments').select('ghl_event_id, closer_id').in('ghl_event_id', slice),
+      calendlySlice.length ? supabase.from('calendly_bookings').select('invitee_uri, host_email').in('invitee_uri', calendlySlice) : Promise.resolve({ data: [] }),
     ])
-    if (hostErr) problems.push(`team: ${hostErr.message}`)
-    if (calErr) problems.push(`calendly: ${calErr.message}`)
-    const byEmail = {}
-    for (const t of hosts || []) if (t.email) byEmail[t.email.toLowerCase()] = t.id
-    for (const b of cal || []) {
-      // The same table holds the US "Strategy Call - IF" event (Ben, 14 Sep 2026:
-      // his US Calendly bookings were counting as Australian on the AU board)
-      if (!isAuCalendlyBooking(b) || /opt digital|test/i.test(b.invitee_name || '')) continue
-      const id = byEmail[(b.host_email || '').toLowerCase()]
-      if (id) bookingsByCloser[id] = (bookingsByCloser[id] || 0) + 1
+    for (const [label, res] of [['logged calls', taken], ['appointments', appts], ['calendly', cal]]) if (res.error) problems.push(`${label}: ${res.error.message}`)
+    const latest = {}
+    for (const c of taken.data || []) {
+      const r = c.closer_eod_reports
+      if (!r?.closer_id || (latest[c.ghl_event_id] && latest[c.ghl_event_id] >= r.report_date)) continue
+      latest[c.ghl_event_id] = r.report_date
+      takerByEvent[c.ghl_event_id] = r.closer_id
     }
+    for (const a of appts.data || []) if (a.closer_id) ownerByEvent[a.ghl_event_id] = a.closer_id
+    for (const b of cal.data || []) {
+      const id = idByEmail[(b.host_email || '').toLowerCase()]
+      if (id) ownerByEvent[b.invitee_uri] = id
+    }
+  }
+  for (const b of goodBookings) {
+    const id = takerByEvent[b.ghl_event_id] || ownerByEvent[b.ghl_event_id]
+    if (id) bookingsByCloser[id] = (bookingsByCloser[id] || 0) + 1
   }
 
   // ── Confirmed / unconfirmed show marks, company and per closer ──
