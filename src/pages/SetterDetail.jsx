@@ -8,7 +8,7 @@ import DataTable from '../components/DataTable'
 import LeadStatusBadge from '../components/LeadStatusBadge'
 import { Loader, ChevronDown, Edit3, Clock } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { useRegion } from '../lib/region'
+import { useRegion, setterLeadInRegion, isAuPhone } from '../lib/region'
 import { pagedFetch } from '../lib/pagedFetch'
 import { sinceDate, rangeToDays } from '../lib/dateUtils'
 import { useSetterStats, useSetterEODs } from '../hooks/useSetterData'
@@ -77,9 +77,10 @@ export default function SetterDetail() {
       .eq('setter_id', id)
       .gte('date_set', sinceDate(range))
       .order('date_set', { ascending: false }))
-      .then((data) => setLeads(data.map(l => ({ ...l, closer_name: l.closer?.name || '—' }))))
+      // Follow the top-bar region like the Setters page (source, UTMs, notes)
+      .then((data) => setLeads(data.filter(l => setterLeadInRegion(l, region)).map(l => ({ ...l, closer_name: l.closer?.name || '—' }))))
       .catch(err => console.warn('[SetterDetail] setter_leads load failed:', err.message))
-  }, [id, range])
+  }, [id, range, region])
 
   // Fetch ALL setter leads for company average comparison — paged. With
   // ~10 setters this query easily clears 1000 rows, and the company-average
@@ -87,11 +88,11 @@ export default function SetterDetail() {
   useEffect(() => {
     pagedFetch(() => supabase
       .from('setter_leads')
-      .select('id, setter_id, status, appointment_date')
+      .select('id, setter_id, status, appointment_date, lead_source, utm_source, utm_campaign, utm_content, notes')
       .gte('date_set', sinceDate(range)))
-      .then(setAllLeads)
+      .then(data => setAllLeads(data.filter(l => setterLeadInRegion(l, region))))
       .catch(err => console.warn('[SetterDetail] allLeads load failed:', err.message))
-  }, [range])
+  }, [range, region])
 
   // Fetch closer EOD aggregates for show rate calculation — paged.
   useEffect(() => {
@@ -173,7 +174,9 @@ export default function SetterDetail() {
     const allOpps = pipelineData.flatMap(p => p.summary.opportunities || [])
     // Filter opportunities to the configured STL window
     const stlCutoff = new Date(Date.now() - stlDays * 86400000).getTime()
-    const stlOpps = allOpps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff)
+    // Region by the lead's phone, the same rule as the WAVV dial split
+    const inRegion = (o) => region === 'all' || (region === 'au') === isAuPhone(o.contact?.phone)
+    const stlOpps = allOpps.filter(o => o.createdAt && new Date(o.createdAt).getTime() >= stlCutoff && inRegion(o))
     if (stlOpps.length === 0) { setLoadingSTL(false); return }
 
     // Build schedule map using current hour values (from state, which tracks DB + edits)
@@ -201,16 +204,22 @@ export default function SetterDetail() {
       }
       setLoadingSTL(false)
     })
-  }, [pipelineData, member, stlDays, stlStartHour, stlEndHour])
+  }, [pipelineData, member, stlDays, stlStartHour, stlEndHour, region])
 
-  // Company-wide averages from all EODs
-  const companyActivity = allReports.reduce((acc, r) => ({
-    dials: acc.dials + (r.outbound_calls || 0),
-    leads: acc.leads + (r.total_leads || 0),
-    pickups: acc.pickups + (r.pickups || 0),
-    mcs: acc.mcs + (r.meaningful_conversations || 0),
-    sets: acc.sets + (r.sets || 0),
-  }), { dials: 0, leads: 0, pickups: 0, mcs: 0, sets: 0 })
+  // Company-wide averages. EOD reports carry no region, so on AU / US the
+  // activity comes from WAVV (split by phone) and sets from the region's
+  // logged leads only (Ben, 15 Sep 2026: the setter pages showed US EOD
+  // dials on the Australian view).
+  const regionSplit = region !== 'all'
+  const companyActivity = regionSplit
+    ? { dials: wavvAgg.totals.dials || 0, leads: wavvAgg.uniqueContacts || 0, pickups: wavvAgg.totals.pickups || 0, mcs: wavvAgg.totals.mcs || 0, sets: 0 }
+    : allReports.reduce((acc, r) => ({
+      dials: acc.dials + (r.outbound_calls || 0),
+      leads: acc.leads + (r.total_leads || 0),
+      pickups: acc.pickups + (r.pickups || 0),
+      mcs: acc.mcs + (r.meaningful_conversations || 0),
+      sets: acc.sets + (r.sets || 0),
+    }), { dials: 0, leads: 0, pickups: 0, mcs: 0, sets: 0 })
 
   const totalCompanySets = Math.max(allLeads.length, companyActivity.sets)
   const companyClosedLeads = allLeads.filter(l => l.status === 'closed')
@@ -238,8 +247,9 @@ export default function SetterDetail() {
   }
 
   // WAVV-based stats from pre-aggregated data
-  const wavvUser = member.wavv_user_id ? wavvAgg.byUser[member.wavv_user_id] : null
-  const hasWavvData = wavvUser && wavvUser.dials > 0
+  const wavvUser = (member.wavv_user_id && wavvAgg.byUser[member.wavv_user_id]) || { dials: 0, pickups: 0, mcs: 0, uniqueContacts: 0, avgDuration: 0, avgCallsPerContact: 0 }
+  // No EOD fallback on AU / US: EOD totals are company-wide
+  const hasWavvData = regionSplit || wavvUser.dials > 0
 
   const effectiveDials = hasWavvData ? wavvUser.dials : stats.outboundCalls
   const effectivePickups = hasWavvData ? wavvUser.pickups : stats.pickups
@@ -248,7 +258,7 @@ export default function SetterDetail() {
   const effectivePickupRate = effectiveDials > 0 ? parseFloat(((effectivePickups / effectiveDials) * 100).toFixed(1)) : 0
 
   // Sets: use EOD totals if higher than setter_leads count (historical data)
-  const eodSets = myEodReports.reduce((s, r) => s + (r.sets || 0), 0)
+  const eodSets = regionSplit ? 0 : myEodReports.reduce((s, r) => s + (r.sets || 0), 0)
   const mySets = Math.max(leads.length, eodSets)
 
   const myRates = {

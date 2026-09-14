@@ -279,10 +279,10 @@ function MTDFunnel({ stats }) {
     // showed a different number than the same metric label everywhere
     // else on the page.
     { label: 'Net Live', value: stats.new_live_calls },
-    { label: 'Offers', value: stats.offers },
+    { label: 'Offers', value: stats.offers }, // null on AU / US (not split by region): step dropped below
     { label: 'Closes', value: stats.closes },
     { label: 'Ascensions', value: stats.ascensions },
-  ]
+  ].filter(s => s.value != null)
   const maxVal = Math.max(...steps.map(s => s.value), 1)
 
   return (
@@ -3777,11 +3777,25 @@ export default function MarketingPerformance() {
       // shows 8 qualified". Fold the excluded ids in here and drop them
       // before bucketing.
       const [{ data, error }, { data: oppRows, error: oppErr }, { data: exclRows }] = await Promise.all([
-        supabase
-          .from('lib_booking_resolved_mv')
-          .select('id, booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_name, is_dq, is_spam, audience')
-          .eq('is_spam', false)
-          .gte('booked_at', sinceStr),
+        // Paged (PostgREST caps a request at 1,000 rows; this window held ~870
+        // on 15 Sep 2026) and carrying contact_email, which isTestBooking needs:
+        // without it every "<name> and OPT Digital" booking read as a test and
+        // dropped out, so US 30d Booked showed 100 against the Overview's 155.
+        (async () => {
+          const rows = []
+          for (let from = 0; ; from += 1000) {
+            const { data, error } = await supabase
+              .from('lib_booking_resolved_mv')
+              .select('id, booked_at, appointment_date, calendar_name, revenue_tier, ghl_contact_id, contact_email, contact_name, is_dq, is_spam, audience')
+              .eq('is_spam', false)
+              .gte('booked_at', sinceStr)
+              .order('booked_at', { ascending: false }).order('id')
+              .range(from, from + 999)
+            if (error) return { data: null, error }
+            rows.push(...(data || []))
+            if (!data || data.length < 1000) return { data: rows, error: null }
+          }
+        })(),
         supabase
           .from('ghl_opportunities')
           .select('ghl_contact_id, created_at')
@@ -3824,7 +3838,9 @@ export default function MarketingPerformance() {
         // overrides so manual revenue_tier flags still work.
         const dqByTier = a.revenue_tier ? isDQRevenueTier(a.revenue_tier) : null
         const isDq = dqByTier !== null ? dqByTier : !!a.is_dq
-        const contactKey = a.ghl_contact_id || `name:${a.contact_name || 'unknown'}`
+        // Calendly (Australian) bookings have no GHL contact id; key them by
+        // email, not first name, or two different "David"s collapse into one.
+        const contactKey = a.ghl_contact_id || (a.contact_email ? `email:${a.contact_email.toLowerCase()}` : `name:${a.contact_name || 'unknown'}`)
         const contactName = a.contact_name || ''
         const audience = a.audience || 'Unknown'
 
@@ -4115,7 +4131,20 @@ export default function MarketingPerformance() {
     // is why marking spam/DQ in the drilldowns appeared to do nothing to the
     // tile counts. RowActions now also triggers refresh_marketing_trend_mv()
     // after each mark so the matview catches up within ~60s.
-    supabase.from('lib_marketing_by_audience_daily_mv').select('*').limit(2000)
+    // Paged, newest first, from the same 730-day floor as the bookings load. A
+    // bare .limit(2000) with no order silently dropped days once the view
+    // outgrew 2,000 rows (886 on 15 Sep 2026 and growing ~6 a day).
+    const floor = etDateOffset(-730)
+    ;(async () => {
+      const rows = []
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from('lib_marketing_by_audience_daily_mv').select('*')
+          .gte('date', floor).order('date', { ascending: false }).order('audience').range(from, from + 999)
+        if (error) return { data: null, error }
+        rows.push(...(data || []))
+        if (!data || data.length < 1000) return { data: rows, error: null }
+      }
+    })()
       .then(({ data, error }) => {
         if (!alive) return
         if (error) {
@@ -4130,6 +4159,26 @@ export default function MarketingPerformance() {
         if (data) setAudienceDaily(data)
       })
       .finally(() => { if (alive) setAudienceDailyBusy(false) })
+    return () => { alive = false }
+  }, [hygieneRefetchKey])
+
+  // Offers per report date from every closer EOD report (same source and rule
+  // as useSalesMetrics / the Closers page). Paged from the 730-day floor.
+  const [eodOffersByDate, setEodOffersByDate] = useState({})
+  useEffect(() => {
+    let alive = true
+    const floor = etDateOffset(-730)
+    ;(async () => {
+      const byDate = {}
+      for (let from = 0; ; from += 1000) {
+        const { data, error } = await supabase.from('closer_eod_reports').select('id, report_date, offers')
+          .gte('report_date', floor).order('report_date', { ascending: false }).order('id').range(from, from + 999)
+        if (error) { console.warn('EOD offers load failed:', error.message); break }
+        for (const r of data || []) byDate[r.report_date] = (byDate[r.report_date] || 0) + (Number(r.offers) || 0)
+        if (!data || data.length < 1000) break
+      }
+      if (alive) setEodOffersByDate(byDate)
+    })()
     return () => { alive = false }
   }, [hygieneRefetchKey])
 
@@ -4228,10 +4277,10 @@ export default function MarketingPerformance() {
     // Fix: when an audience filter IS active and the view hasn't loaded,
     // return [] so tiles render 0 instead of misleading globals.
     const wanted = (selectedAudiences && selectedAudiences.size > 0) ? selectedAudiences : null
-    if (!audienceDaily.length) {
-      if (wanted) return []           // audience filter on, no data yet → empty
-      return entries                  // no filter → global is correct
-    }
+    // Not loaded yet (or failed, which audienceDailyError surfaces): render
+    // nothing rather than marketing_tracker's EOD self-report, which is a
+    // different source and briefly showed different All numbers on load.
+    if (!audienceDaily.length) return []
     const byDate = {}
     const emptyRow = (d) => ({
       date: d,
@@ -4300,9 +4349,17 @@ export default function MarketingPerformance() {
     // "no-shows for Restoration leads specifically" — they reflect "no-shows
     // for everyone in the window". Tooltips on the affected tiles call this
     // out so the operator isn't surprised.
+    // On the AU / US region these header numbers have no region at all, so
+    // they are left out (and shown as "—" via applyProspectMetrics) rather than
+    // passed off as the region's own (Ben, 15 Sep 2026: AU showed 6 offers, an
+    // 85.7% offer rate and 12 offers in the funnel, all of them company-wide).
     const mtByDate = {}
-    for (const e of entries) mtByDate[e.date] = e
+    if (region === 'all') for (const e of entries) mtByDate[e.date] = e
     for (const d in byDate) {
+      // Offers: the count typed on every closer EOD report, confirmed or not,
+      // the same number the Closers page shows. marketing_tracker only carried
+      // confirmed reports (All 7d read 6 here and 12 on Closers, 15 Sep 2026).
+      if (region === 'all') byDate[d].offers = eodOffersByDate[d] || 0
       const mt = mtByDate[d]; if (!mt) continue
       // When an audience filter is active, prefer the audience-bucketed
       // ascensions count we already computed from lib_closer_call_audience.
@@ -4322,33 +4379,18 @@ export default function MarketingPerformance() {
       byDate[d].monthly_accepted    = Number(mt.monthly_accepted) || 0
       byDate[d].auto_bookings       = Number(mt.auto_bookings) || 0
       byDate[d].calls_on_calendar   = Number(mt.calls_on_calendar) || 0
-      // offers + finance_accepted: closer_calls per-row flags are sparse
-      // (closer rarely ticks per-call offered/finance-accepted; aggregate
-      // EOD is the truth). Keep MT global for now — under a filter the
-      // tooltip on those tiles notes "aggregate, not audience-split".
-      byDate[d].offers              = Number(mt.offers) || 0
+      // finance_accepted: closer_calls per-row flags are sparse (closer rarely
+      // ticks per-call finance-accepted; aggregate EOD is the truth). Global;
+      // under a chip the tooltip notes "aggregate, not audience-split".
       byDate[d].finance_accepted    = Number(mt.finance_accepted) || 0
-      // ── Audience-aware fields (gated by `!wanted`) ──────────────────
-      // When a filter is on, the audience-fold above is the source of
-      // truth. When no filter is on, fall through to MT so the All view
-      // still matches closer EOD.
-      if (!wanted) {
-        byDate[d].ascensions          = Number(mt.ascensions) || 0
-        byDate[d].ascend_cash         = Number(mt.ascend_cash) || 0
-        byDate[d].ascend_revenue      = Number(mt.ascend_revenue) || 0
-        byDate[d].finance_offers      = Number(mt.finance_offers) || 0
-        byDate[d].reschedules         = Number(mt.reschedules) || 0
-        byDate[d].no_shows            = Number(mt.no_shows) || 0
-        byDate[d].cancelled_dtf       = Number(mt.cancelled_dtf) || 0
-        byDate[d].cancelled_by_prospect = Number(mt.cancelled_by_prospect) || 0
-        byDate[d].net_new_calls       = Number(mt.net_new_calls) || 0
-        byDate[d].net_fu_calls        = Number(mt.net_fu_calls) || 0
-        byDate[d].net_live_calls      = Number(mt.net_live_calls) || 0
-        byDate[d].new_live_calls      = Number(mt.new_live_calls) || 0
-      }
+      // Live calls, no-shows, reschedules, cancels and ascensions come from
+      // the view on EVERY view, All included. They used to fall through to
+      // marketing_tracker on All, which only counts confirmed EODs: on 15 Sep
+      // 2026 All read 7 live calls and a 42.9% close rate while AU alone had
+      // 7 live calls and US 10, and All stopped being AU + US.
     }
     return Object.values(byDate).sort((a, b) => b.date.localeCompare(a.date))
-  }, [entries, audienceDaily, selectedAudiences])
+  }, [entries, audienceDaily, selectedAudiences, region, eodOffersByDate])
 
   const rangeEntries = useMemo(() => filterByDays(audienceFilteredEntries, range), [audienceFilteredEntries, range])
   const mtdEntries = useMemo(() => filterByDays(audienceFilteredEntries, 'mtd'), [audienceFilteredEntries])
@@ -4443,10 +4485,25 @@ export default function MarketingPerformance() {
   // (Ben 2026-07-15 — kill the 30/34 confusion; calendar is the only truth.)
   const applyProspectMetrics = (statsBundle, rangeOrDays) => {
     const qb = sumBookings(rangeOrDays).qualified
-    return {
+    const out = {
       ...statsBundle,
       qualified_bookings: qb,
       lead_to_booking_pct: statsBundle.leads > 0 ? (qb / statsBundle.leads) * 100 : 0,
+    }
+    if (region === 'all') return out
+    // AU / US: numbers typed on EOD report headers (offers, AR, refunds,
+    // finance and monthly acceptances, auto bookings) have no region. Show
+    // them as "—" instead of the company total, and keep AR out of "all cash".
+    const allCash = (out.trial_cash || 0) + (out.ascend_cash || 0)
+    return {
+      ...out,
+      offers: null, offer_rate: null, cost_per_offer: null,
+      finance_accepted: null, finance_pct: null, finance_offer_pct: null,
+      monthly_offers: null, monthly_accepted: null, monthly_offer_pct: null,
+      ar_collected: null, ar_defaulted: null, ar_success_rate: null,
+      refund_count: null, refund_amount: null,
+      auto_bookings: null, cost_per_auto_booking: null, calls_on_calendar: null,
+      all_cash: allCash, all_cash_roas: out.adspend > 0 ? allCash / out.adspend : 0,
     }
   }
 
@@ -4478,9 +4535,12 @@ export default function MarketingPerformance() {
   // closer_calls-derived counts. The hook now returns this flag; we
   // render a banner above the dashboard when it fires.
   const prospectWindow = useMemo(() => prospectMetricsByRange(range), [range, prospectMetricsByRange])
-  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, sumBookings])
-  const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(entries, 30)), 30), [entries, sumBookings])
-  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, sumBookings])
+  const stats = useMemo(() => applyProspectMetrics(computeMarketingStats(rangeEntries), range), [rangeEntries, range, sumBookings, region])
+  // The "30d" line under each tile: same source and region as the tile. It read
+  // marketing_tracker, the company-wide EOD self-report, so on AU a tile said
+  // "30d $26,966" spend and "CPA 30d $13,483" (all-region spend over 2 AU closes).
+  const stats30 = useMemo(() => applyProspectMetrics(computeMarketingStats(filterByDays(audienceFilteredEntries, 30)), 30), [audienceFilteredEntries, sumBookings, region])
+  const statsMTD = useMemo(() => applyProspectMetrics(computeMarketingStats(mtdEntries), 'mtd'), [mtdEntries, sumBookings, region])
   // Previous-period stats now ALSO pass through applyProspectMetrics so
   // the per-tile ▲▼ arrows compare like-for-like (deduped current vs
   // deduped prev). The useCloserCallProspectMetrics hook fetches a
@@ -4519,7 +4579,7 @@ export default function MarketingPerformance() {
     const prevFrom = new Date(today.getTime() - 2 * n * 86400000 + 86400000)
     return { from: toDateStr(prevFrom), to: toDateStr(prevTo) }
   }, [range])
-  const statsPrev = useMemo(() => applyProspectMetrics(computeMarketingStats(prevEntries), prevRange), [prevEntries, prevRange, sumBookings])
+  const statsPrev = useMemo(() => applyProspectMetrics(computeMarketingStats(prevEntries), prevRange), [prevEntries, prevRange, sumBookings, region])
   // Hoisted calendar-deduped booking totals — same numbers the live
   // Bookings/Q.Books KPI tiles render. whatIfStats baselines from these so
   // toggling What-If doesn't silently swap data source (EOD self-report
@@ -4661,7 +4721,8 @@ export default function MarketingPerformance() {
     // Offer rate (denominator = Net Live, matches stats)
     const offerRateOverride = get('offer_rate')
     const offerRate = offerRateOverride != null ? offerRateOverride / 100 : curOfferRate
-    const offers = get('offers')
+    // No region split for offers (null on AU / US): nothing to forecast from
+    const offers = stats.offers == null ? null : get('offers')
       ?? (live_calls !== stats.live_calls || offerRateOverride != null
         ? Math.round(live_calls * offerRate)
         : stats.offers)
@@ -4696,7 +4757,7 @@ export default function MarketingPerformance() {
     const finance_offers = stats.finance_offers
     const finance_accepted = stats.finance_accepted
 
-    const all_cash = trial_cash + ascend_cash + ar_collected
+    const all_cash = trial_cash + ascend_cash + (ar_collected || 0)
     return {
       adspend, leads, auto_bookings, qualified_bookings, nc_booked, new_live_calls, live_calls, offers, closes,
       // Bookings ALL (qualified + DQ) — the Bookings KPI tile renders bk.all,

@@ -336,7 +336,7 @@ export default function SalesOverview() {
     const t = m.byCloser[c.id] || { ...EMPTY_TOTALS }
     const r = rates(t)
     return { id: c.id, name: c.name, liveNC: t.lives, closes: t.closes, booked: t.qualifiedBookings, offers: t.offers, revenue: r.revenue, cash: t.trialCash, ascendCash: t.ascendCash, totalCash: r.cash,
-      showPct: r.showRate.toFixed(1), closePct: r.closeRate.toFixed(1), offerPct: r.offerRate.toFixed(1) }
+      showPct: r.showRate.toFixed(1), closePct: r.closeRate.toFixed(1), offerPct: r.offerRate == null ? null : r.offerRate.toFixed(1) } // null on AU / US: offers are not split by region
   }).sort((a, b) => b.totalCash - a.totalCash)
 
   // Per-setter leaderboard: dials from WAVV, sets = leads they logged
@@ -450,7 +450,8 @@ export default function SalesOverview() {
             <KPICard label="Confirmed show rate" value={R.confShowRate != null ? `${R.confShowRate}%` : '—'} subtitle={noMarksNote || `${T.confShowed} of ${T.confShowed + T.confNoShow} confirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
             <KPICard label="Unconfirmed show rate" value={R.unconfShowRate != null ? `${R.unconfShowRate}%` : '—'} subtitle={noMarksNote || `${T.unconfShowed} of ${T.unconfShowed + T.unconfNoShow} unconfirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
             <KPICard label="Calls confirmed" value={confSplit ? `${confSplit.confPct}%` : '—'} subtitle={noMarksNote || (confSplit ? `${confSplit.unconfPct}% unconfirmed · ${confSplit.conf} of ${confSplit.total} marked calls` : 'no confirmation marks in this window')} target={bm('confirmed_share')} direction="above" onClick={() => setDrill('show')} />
-            <KPICard label="Speed to lead" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stlSplit ? `in hours ${fmtSecs(stlSplit.inHours)} · out of hours ${fmtSecs(stlSplit.outHours)} · this week ${fmtSecs(stlSplit.week)}` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
+            {/* Nobody dialled is not a 0s response time (Ben, 15 Sep 2026: AU read "0s · On target" with 25 leads and 0 dials) */}
+            <KPICard label="Speed to lead" value={stl ? (stl.worked ? stl.avgDisplay : '—') : stlLoading ? '…' : '—'} subtitle={stl && !stl.worked ? `none of ${stl.notCalled} leads dialled yet` : stlSplit ? `in hours ${fmtSecs(stlSplit.inHours)} · out of hours ${fmtSecs(stlSplit.outHours)} · this week ${fmtSecs(stlSplit.week)}` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number'} score={stl?.worked ? stl.avgSecs : undefined} target={300} direction="below" targetLabel="Target under 5 min" />
             <KPICard label="Dialled within 5 minutes" value={stl ? `${stl.pctUnder5m}%` : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.under5m} of ${stl.worked} dialled leads · ${stl.notCalled} never dialled` : undefined} target={80} direction="above" targetLabel="Target 80%" />
           </div>
         </section>
