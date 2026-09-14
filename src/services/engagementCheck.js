@@ -98,7 +98,8 @@ async function fetchUpcomingCalendly() {
     for (const c of contacts || []) if (c.email) contactByEmail[c.email.toLowerCase()] = c.ghl_contact_id
   }
   return aus
-    .filter(b => !/opt digital|test/i.test(b.invitee_name || ''))
+    // Internal bookings, same rule as lib_strategy_booking_resolved for Calendly rows
+    .filter(b => !/@(opt\.co\.nz|optdigital\.io)$/i.test(b.invitee_email || '') && !/^(test|diamont)/i.test(b.invitee_name || ''))
     .map(b => ({
       ghl_event_id: b.invitee_uri,
       ghl_contact_id: contactByEmail[(b.invitee_email || '').toLowerCase()] || null,
