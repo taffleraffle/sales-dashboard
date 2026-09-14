@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { useRegion, audienceInRegion } from '../lib/region'
+import { useRegion, audienceInRegion, isAuCalendlyBooking } from '../lib/region'
 import { dateRangeBoundsET } from '../lib/dateUtils'
 
 /*
@@ -190,14 +190,16 @@ async function load(range, region = 'all') {
   if (inRegion('Australia')) {
     const [{ data: hosts, error: hostErr }, { data: cal, error: calErr }] = await Promise.all([
       supabase.from('team_members').select('id, email'),
-      supabase.from('calendly_bookings').select('host_email, invitee_name, status').gte('booked_at', startStr).lte('booked_at', endStr).eq('status', 'active'),
+      supabase.from('calendly_bookings').select('host_email, invitee_name, status, event_name, event_type_uri').gte('booked_at', startStr).lte('booked_at', endStr).eq('status', 'active'),
     ])
     if (hostErr) problems.push(`team: ${hostErr.message}`)
     if (calErr) problems.push(`calendly: ${calErr.message}`)
     const byEmail = {}
     for (const t of hosts || []) if (t.email) byEmail[t.email.toLowerCase()] = t.id
     for (const b of cal || []) {
-      if (/opt digital|test/i.test(b.invitee_name || '')) continue
+      // The same table holds the US "Strategy Call - IF" event (Ben, 14 Sep 2026:
+      // his US Calendly bookings were counting as Australian on the AU board)
+      if (!isAuCalendlyBooking(b) || /opt digital|test/i.test(b.invitee_name || '')) continue
       const id = byEmail[(b.host_email || '').toLowerCase()]
       if (id) bookingsByCloser[id] = (bookingsByCloser[id] || 0) + 1
     }

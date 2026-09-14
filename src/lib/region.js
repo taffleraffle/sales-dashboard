@@ -43,13 +43,31 @@ export function audienceInRegion(audience, region) {
   return region === 'au' ? isAu : !isAu
 }
 
+/* An Australian phone is +61 followed by nine digits (eleven digits starting
+   61) or a local 04 mobile as WAVV sometimes stores it. Length matters: WAVV
+   stores US numbers as ten bare digits, so a Reading PA number (610...) or a
+   Nashville one (615...) also "starts with 61" and was being counted as an
+   Australian dial (Ben, 14 Sep 2026). One rule for dials, leads and setter
+   leads, so the regions cannot drift. */
+export function isAuPhone(phone) {
+  const d = String(phone || '').replace(/\D/g, '')
+  return (d.length === 11 && d.startsWith('61')) || /^04\d{8}$/.test(d)
+}
+
+/* The Australian strategy call is one Calendly event type; the same table also
+   holds the US "Strategy Call - IF" bookings. Same rule as
+   lib_strategy_booking_resolved (migration 175). */
+export const CALENDLY_AUS_EVENT_TYPE = 'https://api.calendly.com/event_types/33d4141c-266a-48bf-a62a-4800c8aaf492'
+export function isAuCalendlyBooking(b) {
+  return b?.event_type_uri === CALENDLY_AUS_EVENT_TYPE || /\(aus\)|australia/i.test(b?.event_name || '')
+}
+
 /* Setter-logged leads carry no resolved audience. Australian if the source
    or any UTM names an AU funnel, or the phone is +61. */
 const AU_HINT = /austral|tradie|facebook[- ]?oz|facebook-au|au-tradie|\bau\b|\(au\)/i
 export function setterLeadInRegion(lead, region) {
   if (!region || region === 'all') return true
   const text = [lead?.lead_source, lead?.utm_source, lead?.utm_campaign, lead?.utm_content, lead?.notes].filter(Boolean).join(' ')
-  const phone = String(lead?.phone || lead?.lead_phone || '').replace(/\D/g, '')
-  const isAu = AU_HINT.test(text) || /^61/.test(phone)
+  const isAu = AU_HINT.test(text) || isAuPhone(lead?.phone || lead?.lead_phone)
   return region === 'au' ? isAu : !isAu
 }

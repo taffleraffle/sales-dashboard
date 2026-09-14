@@ -73,18 +73,24 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
 
   useEffect(() => { setFilter('all') }, [kind])
 
-  // Leads are not part of the metrics hook (nothing else needs the rows), so fetch on open
+  // Leads are not part of the metrics hook (nothing else needs the rows), so
+  // fetch on open. Same definition as the tile (migration 187): a Typeform
+  // response with an email or a phone, plus the Facebook lead-form contacts
+  // tagged "fb lead (aus)" in GoHighLevel, which never fill a Typeform.
   useEffect(() => {
     if ((kind !== 'leads' && kind !== 'conversion') || !win) return
     let alive = true
     setLeads(null)
     ;(async () => {
+      const region = metrics.region || 'all'
+      const startIso = `${win.startStr}T00:00:00${etOffset(win.startStr)}`
+      const endIso = `${win.endStr}T23:59:59${etOffset(win.endStr)}`
       const rows = []
       for (let from = 0; ; from += 1000) {
         const { data, error } = await supabase
           .from('typeform_responses')
-          .select('response_id, submitted_at, first_name, last_name, email, form_name, revenue_tier, qualified, utm_campaign')
-          .gte('submitted_at', `${win.startStr}T00:00:00${etOffset(win.startStr)}`).lte('submitted_at', `${win.endStr}T23:59:59${etOffset(win.endStr)}`)
+          .select('response_id, submitted_at, first_name, last_name, email, phone, form_name, revenue_tier, qualified, utm_campaign')
+          .gte('submitted_at', startIso).lte('submitted_at', endIso)
           .order('submitted_at', { ascending: false }).range(from, from + 999)
         if (error) { console.warn('leads drilldown failed:', error.message); break }
         rows.push(...(data || []))
@@ -92,9 +98,8 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       }
       const { data: excl } = await supabase.from('lead_excluded').select('response_id')
       const ex = new Set((excl || []).map(e => e.response_id))
-      let kept = rows.filter(r => !ex.has(r.response_id))
+      let kept = rows.filter(r => !ex.has(r.response_id) && (r.email || r.phone))
       // Region: the same resolver the tiles use (audience per response)
-      const region = metrics.region || 'all'
       if (region !== 'all' && kept.length) {
         const aud = new Map()
         for (let i = 0; i < kept.length; i += 300) {
@@ -103,6 +108,26 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
           for (const x of (res || [])) aud.set(x.response_id, x.audience_slug === 'australia' ? 'Australia' : (x.audience_slug || 'Unknown'))
         }
         kept = kept.filter(r => audienceInRegion(aud.get(r.response_id) || 'Unknown', region))
+      }
+      // Australian Facebook lead-form leads, minus anyone who also filled a Typeform (matched on email, any date)
+      if (region !== 'us') {
+        const { data: lf } = await supabase
+          .from('ghl_contacts')
+          .select('ghl_contact_id, date_added, first_name, last_name, email, phone')
+          .contains('tags', ['fb lead (aus)'])
+          .gte('date_added', startIso).lte('date_added', endIso)
+          .order('date_added', { ascending: false })
+        const emails = [...new Set((lf || []).map(c => (c.email || '').toLowerCase()).filter(Boolean))]
+        const seen = new Set()
+        if (emails.length) {
+          const { data: tf } = await supabase.from('typeform_responses').select('email').in('email', emails)
+          for (const t of tf || []) seen.add((t.email || '').toLowerCase())
+        }
+        for (const c of lf || []) {
+          if (c.email && seen.has(c.email.toLowerCase())) continue
+          kept.push({ response_id: c.ghl_contact_id, submitted_at: c.date_added, first_name: c.first_name, last_name: c.last_name, email: c.email, phone: c.phone, form_name: 'Facebook lead form (AU)', revenue_tier: null, qualified: true, utm_campaign: null })
+        }
+        kept.sort((a, b) => (b.submitted_at || '').localeCompare(a.submitted_at || ''))
       }
       if (alive) setLeads(kept)
     })()
@@ -130,7 +155,7 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
 
   if (kind === 'leads') {
     title = 'Cost per lead: every lead'
-    subtitle = 'Typeform opt-ins in the window, the same count the tile divides ad spend by.'
+    subtitle = 'Form fills with an email or phone in the window (Typeform, plus the Australian Facebook lead form), the same count the tile divides ad spend by.'
     const q = (leads || []).filter(l => l.qualified).length
     tiles = <>
       <KPICard label="Leads" value={leads ? leads.length : '…'} subtitle={`${money(T.adspend)} ad spend`} />
@@ -227,7 +252,7 @@ export default function MetricDrilldown({ kind, onClose, metrics, closers = [], 
       { value: 'closed', label: 'Closed', count: closes.length },
     ]
     tiles = <>
-      <KPICard label="Leads" value={T.leads} subtitle="Typeform opt-ins" />
+      <KPICard label="Leads" value={T.leads} subtitle="form fills we can contact" />
       <KPICard label="Booked" value={T.qualifiedBookings} subtitle={`${R.leadToBooked}% of leads`} />
       <KPICard label="Live" value={T.lives} subtitle={`${R.bookedToLive}% of booked`} />
       <KPICard label="Closed" value={T.closes} subtitle={`${R.closeRate}% of live · ${R.leadToClose}% of leads`} />

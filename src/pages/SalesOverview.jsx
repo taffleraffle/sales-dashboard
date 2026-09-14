@@ -278,8 +278,9 @@ export default function SalesOverview() {
   const openRevenueBreakdown = () => setShowRevenueBreakdown(true)
 
 
-  // Fetch WAVV calls and check endangered leads (live from GHL)
+  // Fetch WAVV calls and check endangered leads (GHL calendars for US, Calendly for AU)
   useEffect(() => {
+    let alive = true
     setLoadingEndangered(true)
     const since = new Date()
     since.setDate(since.getDate() - 7)
@@ -288,11 +289,12 @@ export default function SalesOverview() {
       .select('phone_number, call_duration')
       .gte('started_at', since.toISOString())
       .then(({ data }) => {
-        checkEndangeredLeads(data || [])
-          .then(setEndangeredLeads)
-          .finally(() => setLoadingEndangered(false))
+        checkEndangeredLeads(data || [], () => {}, region)
+          .then(rows => { if (alive) setEndangeredLeads(rows) })
+          .finally(() => { if (alive) setLoadingEndangered(false) })
       })
-  }, [])
+    return () => { alive = false }
+  }, [region])
 
   // WAVV aggregates
   useEffect(() => {
@@ -306,11 +308,11 @@ export default function SalesOverview() {
   useEffect(() => {
     let alive = true
     setStlLoading(true); setStlError(null)
-    fetchSpeedToLeadFromDb(range, stlSchedules)
+    fetchSpeedToLeadFromDb(range, stlSchedules, region)
       .then(res => { if (alive) { setStl(res); setStlLoading(false) } })
       .catch(err => { console.warn('speed to lead failed:', err); if (alive) { setStl(null); setStlError(err?.message || 'failed'); setStlLoading(false) } })
     return () => { alive = false }
-  }, [range, scheduleKey]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [range, scheduleKey, region]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Everything below reads the unified layer (useSalesMetrics) ──
   const T = m.totals
@@ -360,6 +362,11 @@ export default function SalesOverview() {
   const revPerBooked = R.revPerBooked
   const money = (n) => n == null ? '—' : `$${Math.round(n).toLocaleString()}`
   const money2 = (n) => n == null ? '—' : `$${n.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+
+  // Confirmation marks are set on GHL appointments by the setters. Australian
+  // calls book on Calendly, so on AU these three tiles can only ever be empty;
+  // say why rather than show "0 of 0".
+  const noMarksNote = region === 'au' && !confSplit ? 'Australian calls book on Calendly, which carries no confirmation marks' : null
 
   const upcoming = [...(endangeredLeads || [])]
     .sort((a, b) => (a.hoursUntil ?? 1e9) - (b.hoursUntil ?? 1e9))
@@ -440,9 +447,9 @@ export default function SalesOverview() {
         <section>
           <SectionLabel>Calls</SectionLabel>
           <div className="kpi-grid">
-            <KPICard label="Confirmed show rate" value={R.confShowRate != null ? `${R.confShowRate}%` : '—'} subtitle={`${T.confShowed} of ${T.confShowed + T.confNoShow} confirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
-            <KPICard label="Unconfirmed show rate" value={R.unconfShowRate != null ? `${R.unconfShowRate}%` : '—'} subtitle={`${T.unconfShowed} of ${T.unconfShowed + T.unconfNoShow} unconfirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
-            <KPICard label="Calls confirmed" value={confSplit ? `${confSplit.confPct}%` : '—'} subtitle={confSplit ? `${confSplit.unconfPct}% unconfirmed · ${confSplit.conf} of ${confSplit.total} marked calls` : 'no confirmation marks in this window'} target={bm('confirmed_share')} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Confirmed show rate" value={R.confShowRate != null ? `${R.confShowRate}%` : '—'} subtitle={noMarksNote || `${T.confShowed} of ${T.confShowed + T.confNoShow} confirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Unconfirmed show rate" value={R.unconfShowRate != null ? `${R.unconfShowRate}%` : '—'} subtitle={noMarksNote || `${T.unconfShowed} of ${T.unconfShowed + T.unconfNoShow} unconfirmed calls showed`} target={bm('show_rate_new') ?? 50} direction="above" onClick={() => setDrill('show')} />
+            <KPICard label="Calls confirmed" value={confSplit ? `${confSplit.confPct}%` : '—'} subtitle={noMarksNote || (confSplit ? `${confSplit.unconfPct}% unconfirmed · ${confSplit.conf} of ${confSplit.total} marked calls` : 'no confirmation marks in this window')} target={bm('confirmed_share')} direction="above" onClick={() => setDrill('show')} />
             <KPICard label="Speed to lead" value={stl ? stl.avgDisplay : stlLoading ? '…' : '—'} subtitle={stlSplit ? `in hours ${fmtSecs(stlSplit.inHours)} · out of hours ${fmtSecs(stlSplit.outHours)} · this week ${fmtSecs(stlSplit.week)}` : stlLoading ? 'matching leads to dials' : stlError ? `could not load: ${stlError}` : 'no leads with a phone number'} score={stl?.avgSecs} target={300} direction="below" targetLabel="Target under 5 min" />
             <KPICard label="Dialled within 5 minutes" value={stl ? `${stl.pctUnder5m}%` : stlLoading ? '…' : '—'} subtitle={stl ? `${stl.under5m} of ${stl.worked} dialled leads · ${stl.notCalled} never dialled` : undefined} target={80} direction="above" targetLabel="Target 80%" />
           </div>

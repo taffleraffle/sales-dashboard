@@ -1725,10 +1725,13 @@ async function fetchLeads({ from, to, audiences } = {}) {
     .map(r => {
       const mark = exclById[r.response_id] || null    // spam | duplicate | manual | null
       const audience = audMap[r.ad_id] || 'Untracked'
+      // 'blank' = DQ'd at the revenue question before the form asked for a
+      // name, email or phone. Not a lead (migration 187), shown for the record.
       const status = mark === 'spam' ? 'spam'
         : mark === 'duplicate' ? 'dup'
         : mark === 'manual' ? 'removed'
         : mark ? 'removed'
+        : (!r.email && !r.phone) ? 'blank'
         : audience === 'Untracked' ? 'untracked'
         : 'qual'
       return {
@@ -2120,7 +2123,7 @@ const BOOKING_REVENUE_COL = {
   key: 'revenue_tier', label: 'Revenue', cls: 'text-[10px] uppercase text-text-secondary whitespace-nowrap',
   render: r => r.revenue_tier || '—',
 }
-const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', dup: 'text-yellow-400', test: 'text-text-400/60', removed: 'text-text-400/60', untracked: 'text-yellow-400' }
+const STATUS_STYLE = { qual: 'text-success', dq: 'text-orange-400', spam: 'text-red-400', dup: 'text-yellow-400', test: 'text-text-400/60', removed: 'text-text-400/60', untracked: 'text-yellow-400', blank: 'text-text-400/60' }
 const BOOKING_TYPE_COL = {
   key: 'status', label: 'Status',
   render: r => <span className={`text-[10px] uppercase ${STATUS_STYLE[r.status] || 'text-text-secondary'}`}>{r.status || 'qual'}</span>,
@@ -2495,9 +2498,10 @@ const DRILLDOWN_CONFIG = {
     // can fix attribution. The footer reconciles the two counts.
     footer: rows => {
       const counted = rows.filter(r => r.status === 'qual').length
+      const blank = rows.filter(r => r.status === 'blank').length
       return counted === rows.length
         ? `${rows.length} leads — all counted by the tile`
-        : `${rows.length} listed · ${counted} counted by the tile (${rows.length - counted} untracked/marked)`
+        : `${rows.length} listed · ${counted} counted by the tile (${blank ? `${blank} blank, no contact details · ` : ''}${rows.length - counted - blank} untracked/marked)`
     },
   },
   adspend: {

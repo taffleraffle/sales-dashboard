@@ -65,6 +65,11 @@ const QUALIFIED_TIERS = new Set([
 const UNQUALIFIED_TIERS = new Set([
   '$0-$30,000',
   'Under $500K',
+  // The AU and YouTube forms DQ at this bucket (the form ends on the DQ page
+  // before asking for contact details). It was falling through to the
+  // "$-digit means qualified" fallback below (Ben, 14 Sep 2026; migration
+  // 187 backfilled the existing rows).
+  '$0-$50k/m',
 ])
 
 function classifyTier(revenueLabel: string | null, endingScreen: string | null): 'qualified' | 'unqualified' | 'abandoned' {
