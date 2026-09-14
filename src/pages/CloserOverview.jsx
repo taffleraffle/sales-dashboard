@@ -41,7 +41,8 @@ export default function CloserOverview() {
   }
 
   const rows = closers.filter(c => c.status !== 'former' || m.byCloser[c.id]).map(c => {
-    const t = m.byCloser[c.id] || { ...EMPTY_TOTALS }
+    // No activity in this region: offers are still "not split", not zero
+    const t = m.byCloser[c.id] || { ...EMPTY_TOTALS, offers: m.region === 'all' ? 0 : null }
     const r = rates(t)
     return { id: c.id, name: c.name, former: c.status === 'former', booked: t.qualifiedBookings, live: t.lives, offers: t.offers, closes: t.closes,
       showRate: r.showRate, closeRate: r.closeRate, offerRate: r.offerRate, revenue: r.revenue, cash: r.cash }
@@ -73,7 +74,7 @@ export default function CloserOverview() {
           <KPICard label="Booked" value={T.qualifiedBookings} subtitle="qualified calls on the calendar" />
           <KPICard label="Live" value={T.lives} subtitle={`${T.fuLives} follow-up lives separately`} />
           <KPICard label="No shows" value={T.noShows} subtitle={`${T.reschedules} rescheduled · ${T.cancels} cancelled`} />
-          <KPICard label="Offers" value={T.offers} />
+          <KPICard label="Offers" value={T.offers ?? '—'} subtitle={T.offers == null ? 'typed per EOD report, not split by region' : undefined} />
           <KPICard label="Closes" value={T.closes} subtitle={T.ascensions > 0 ? `${T.ascensions} ascensions separately` : undefined} />
           <KPICard label="Revenue" value={money(R.revenue)} subtitle="trial + ascension" />
           <KPICard label="Cash collected" value={money(R.cash)} subtitle={R.revenue > 0 ? `${R.cashCollectRate}% of revenue` : undefined} />
@@ -101,18 +102,18 @@ export default function CloserOverview() {
               { key: 'name', label: 'Closer', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} /> },
               { key: 'booked', label: 'Booked', align: 'right' },
               { key: 'live', label: 'Live', align: 'right' },
-              { key: 'offers', label: 'Offers', align: 'right' },
+              { key: 'offers', label: 'Offers', align: 'right', render: r => r.offers ?? '—' },
               { key: 'closes', label: 'Closes', align: 'right', strong: true },
               { key: 'showRate', label: 'Show', align: 'right', render: r => `${r.showRate}%`, tone: r => toneOf(r.showRate, bm('show_rate_new', 50)) },
               { key: 'closeRate', label: 'Close', align: 'right', render: r => `${r.closeRate}%`, tone: r => toneOf(r.closeRate, bm('close_rate', 30)) },
-              { key: 'offerRate', label: 'Offer', align: 'right', render: r => `${r.offerRate}%`, tone: r => toneOf(r.offerRate, bm('offer_rate', 80)) },
+              { key: 'offerRate', label: 'Offer', align: 'right', render: r => r.offerRate == null ? '—' : `${r.offerRate}%`, tone: r => r.offerRate == null ? null : toneOf(r.offerRate, bm('offer_rate', 80)) },
               { key: 'revenue', label: 'Revenue', align: 'right', render: r => money(r.revenue) },
               { key: 'cash', label: 'Cash', align: 'right', strong: true, render: r => money(r.cash) },
             ]}
           />
         </Card>
         <p style={{ fontSize: 12.5, color: 'var(--ink-4)', margin: '12px 4px 0' }}>
-          Company tiles and the Team row read the marketing view (calendar bookings, confirmed call rows). Per-closer rows are the same call rows grouped by who filed them; a booking with no closer on the appointment is counted against the closer&apos;s own new-call rows instead.
+          Company tiles and the Team row read the marketing view (calendar bookings, every logged call row). Per-closer rows are the same call rows grouped by who filed them. A booking is credited to the closer who logged the call, or to the calendar owner until it is logged; a closer&apos;s Booked is never below the new calls they logged, so it can exceed their share of the team total. Offers are typed per EOD report and only show on All.
         </p>
       </div>
     </div>

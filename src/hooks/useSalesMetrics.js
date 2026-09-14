@@ -73,8 +73,9 @@ export function rates(t) {
     cash, revenue,
     showRate: pct(t.lives, t.qualifiedBookings || t.ncRows),
     closeRate: pct(t.closes, t.lives),                 // Ben's rule: closes / live new calls
-    offerRate: pct(t.offers, t.lives + t.fuLives),
-    offerCloseRate: pct(t.closes, t.offers),
+    // null when offers cannot be split by region (see load)
+    offerRate: t.offers == null ? null : pct(t.offers, t.lives + t.fuLives),
+    offerCloseRate: t.offers == null ? null : pct(t.closes, t.offers),
     noShowRate: pct(t.noShows, t.qualifiedBookings || t.ncRows),
     rescheduleRate: pct(t.reschedules, t.qualifiedBookings || t.ncRows),
     cashCollectRate: pct(cash, revenue),
@@ -166,9 +167,13 @@ async function load(range, region = 'all') {
   // across every report for the same reason as the call rows above: leaving
   // offers on confirmed reports only, while closes counted all of them, gave
   // closers more closes than offers.
+  // A report header has no region, so offers only exist on All. On AU / US
+  // they are null (shown as "—"), for the team AND each closer: the per-closer
+  // count used to stay all-region, so on AU Ben read 4 offers on 1 Australian
+  // live call (400%) and Ahmad, who takes no AU calls, 3 (Ben, 15 Sep 2026).
   const offersByCloser = {}
-  for (const r of reports) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
-  totals.offers = region === 'all' ? Object.values(offersByCloser).reduce((a, b) => a + b, 0) : 0
+  if (region === 'all') for (const r of reports) offersByCloser[r.closer_id] = (offersByCloser[r.closer_id] || 0) + num(r.offers)
+  totals.offers = region === 'all' ? Object.values(offersByCloser).reduce((a, b) => a + b, 0) : null
   totals.ncRows = calls.filter(c => c.call_type === 'new_call').length
 
   // ── Per-closer calendar bookings (booking -> appointment -> closer) ──
@@ -257,6 +262,7 @@ async function load(range, region = 'all') {
     if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] || 0 }
     byCloser[id].offers = n
   }
+  if (region !== 'all') for (const t of Object.values(byCloser)) t.offers = null
   for (const [id, c] of Object.entries(confByCloser)) {
     if (!byCloser[id]) byCloser[id] = { ...EMPTY_TOTALS, calendarBookings: bookingsByCloser[id] || 0 }
     Object.assign(byCloser[id], c)

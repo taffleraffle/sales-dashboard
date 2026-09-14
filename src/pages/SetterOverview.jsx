@@ -12,7 +12,7 @@ import { setterLeadInRegion, useRegion } from '../lib/region'
 import { useTeamMembers } from '../hooks/useTeamMembers'
 import { useSetterEODs } from '../hooks/useSetterData'
 import { supabase } from '../lib/supabase'
-import { sinceDate, rangeToDays } from '../lib/dateUtils'
+import { sinceDate, rangeToDays, dateRangeBoundsET } from '../lib/dateUtils'
 import { syncGHLAppointments } from '../services/ghlCalendar'
 import { fetchWavvAggregates } from '../services/wavvService'
 import { Plus } from 'lucide-react'
@@ -83,10 +83,15 @@ export default function SetterOverview() {
   useEffect(() => {
     async function fetchLeads() {
       setLoadingLeads(true)
+      // utm_* and notes are what setterLeadInRegion reads besides the source;
+      // without them every setter lead was classified by lead_source ("ghl")
+      // alone. The upper bound makes a Custom range end where it says.
+      const { endStr } = dateRangeBoundsET(range)
       const { data } = await supabase
         .from('setter_leads')
-        .select('id, setter_id, closer_id, lead_name, lead_source, date_set, appointment_date, status, revenue_attributed, closer:team_members!setter_leads_closer_id_fkey(name)')
+        .select('id, setter_id, closer_id, lead_name, lead_source, utm_source, utm_campaign, utm_content, notes, date_set, appointment_date, status, revenue_attributed, closer:team_members!setter_leads_closer_id_fkey(name)')
         .gte('date_set', sinceDate(range))
+        .lte('date_set', endStr)
         .order('date_set', { ascending: false })
         .limit(500)
       setAllLeads(data || [])
@@ -130,14 +135,19 @@ export default function SetterOverview() {
     reschedules: acc.reschedules + (r.reschedules || 0),
   }), { dials: 0, leads: 0, pickups: 0, mcs: 0, sets: 0, reschedules: 0 })
 
-  const hasWavv = wavvAgg.totals.dials > 0
+  // EOD activity (dials, pickups, leads, sets typed on the setter report) has
+  // no region. On AU / US only WAVV, which is split by phone number, counts:
+  // falling back to the EOD totals put 245 US dials on the Australian view
+  // when WAVV had none for Australia (Ben, 15 Sep 2026).
+  const regionSplit = region !== 'all'
+  const hasWavv = wavvAgg.totals.dials > 0 || regionSplit
   const companyActivity = {
     dials: hasWavv ? wavvAgg.totals.dials : eodActivity.dials,
     pickups: hasWavv ? wavvAgg.totals.pickups : eodActivity.pickups,
     mcs: hasWavv ? wavvAgg.totals.mcs : eodActivity.mcs,
     leads: hasWavv ? wavvAgg.uniqueContacts : eodActivity.leads,
-    sets: eodActivity.sets,
-    reschedules: eodActivity.reschedules,
+    sets: regionSplit ? null : eodActivity.sets,
+    reschedules: regionSplit ? null : eodActivity.reschedules,
   }
 
   const pickupRate = companyActivity.dials > 0 ? ((companyActivity.pickups / companyActivity.dials) * 100).toFixed(1) : 0
@@ -153,11 +163,13 @@ export default function SetterOverview() {
     pickupRate: parseFloat(pickupRate),
   }
 
-  // Auto-booking distribution per setter (matched by ghl_user_id)
-  const totalAutoBookings = autoBookings.length
+  // Auto-booking distribution per setter (matched by ghl_user_id). The intro
+  // calendars are GoHighLevel (US) calendars; Australia books on Calendly.
+  const regionAutoBookings = region === 'au' ? [] : autoBookings
+  const totalAutoBookings = regionAutoBookings.length
   const autoBookingsBySetter = {}
   for (const setter of setters) {
-    const myAuto = autoBookings.filter(a => a.ghl_user_id === setter.ghl_user_id || a.closer_id === setter.id)
+    const myAuto = regionAutoBookings.filter(a => a.ghl_user_id === setter.ghl_user_id || a.closer_id === setter.id)
     autoBookingsBySetter[setter.id] = {
       count: myAuto.length,
       pct: totalAutoBookings > 0 ? parseFloat(((myAuto.length / totalAutoBookings) * 100).toFixed(1)) : 0,
@@ -166,11 +178,12 @@ export default function SetterOverview() {
   // Per-setter breakdown — uses pre-aggregated WAVV data (no raw call filtering)
   const setterCards = setters.filter(s => s.status !== 'former' || allLeads.some(l => l.setter_id === s.id)).map(setter => {
     // Look up pre-aggregated WAVV stats for this setter
-    const wavvUser = setter.wavv_user_id ? wavvAgg.byUser[setter.wavv_user_id] : null
-    const setterHasWavv = wavvUser && wavvUser.dials > 0
+    const wavvUser = (setter.wavv_user_id && wavvAgg.byUser[setter.wavv_user_id]) || { dials: 0, pickups: 0, mcs: 0, uniqueContacts: 0, avgDuration: 0, avgCallsPerContact: 0 }
+    // On AU / US there is no EOD fallback (see regionSplit above): zero WAVV dials in the region means zero
+    const setterHasWavv = regionSplit || wavvUser.dials > 0
 
-    // Activity from EODs (fallback when no WAVV data)
-    const myReports = reports.filter(r => r.setter_id === setter.id)
+    // Activity from EODs (fallback when no WAVV data, All only)
+    const myReports = regionSplit ? [] : reports.filter(r => r.setter_id === setter.id)
     const eod = myReports.reduce((acc, r) => ({
       dials: acc.dials + (r.outbound_calls || 0),
       leads: acc.leads + (r.total_leads || 0),
@@ -207,7 +220,7 @@ export default function SetterOverview() {
     return {
       id: setter.id,
       name: setter.name,
-      dataSource: setterHasWavv ? 'wavv' : 'eod',
+      dataSource: setterHasWavv ? 'wavv' : setter.wavv_user_id ? 'eod-no-dials' : 'eod',
       // Activity — WAVV-primary for dials/pickups/MCs/leads worked
       dials,
       leads: setterHasWavv ? wavvUser.uniqueContacts : eod.leads,
@@ -303,7 +316,7 @@ export default function SetterOverview() {
               empty="No setters found. Add people on the Team page."
               footer={{ name: 'Team', ...tot, pickupRate: tot.dials ? parseFloat(((tot.pickups / tot.dials) * 100).toFixed(1)) : 0, showRate: parseFloat(showRate) || 0, closeRate: parseFloat(closeRate) || 0 }}
               columns={[
-                { key: 'name', label: 'Setter', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} sub={r.dataSource === 'eod' ? 'EOD only, no WAVV link' : undefined} /> },
+                { key: 'name', label: 'Setter', render: (r, f) => f ? <span style={{ fontWeight: 700 }}>Team</span> : <Person name={r.name} rank={r._rank} sub={r.dataSource === 'eod' ? 'EOD only, no WAVV link' : r.dataSource === 'eod-no-dials' ? 'no WAVV dials in this window, EOD figures' : undefined} /> },
                 { key: 'dials', label: 'Dials', align: 'right', strong: true, render: r => (r.dials || 0).toLocaleString() },
                 { key: 'pickups', label: 'Pickups', align: 'right', render: r => (r.pickups || 0).toLocaleString() },
                 { key: 'pickupRate', label: 'Pickup', align: 'right', render: r => `${r.pickupRate ?? 0}%`, tone: r => toneOf(r.pickupRate, 20) },

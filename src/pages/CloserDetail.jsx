@@ -36,7 +36,7 @@ export default function CloserDetail() {
   }, [id])
 
   const allCalls = m.calls.filter(c => c.closer_id === id)
-  const mine = m.byCloser[id] || { ...EMPTY_TOTALS }
+  const mine = m.byCloser[id] || { ...EMPTY_TOTALS, offers: m.region === 'all' ? 0 : null }
   const my = rates(mine)
   const company = m.r
 
@@ -52,7 +52,8 @@ export default function CloserDetail() {
     return <div className="flex items-center justify-center h-64"><Loader className="animate-spin" /></div>
   }
 
-  const delta = (a, b) => parseFloat(((a || 0) - (b || 0)).toFixed(1))
+  // null (offers on AU / US: not split by region) means no comparison, not zero
+  const delta = (a, b) => a == null || b == null ? null : parseFloat(((a || 0) - (b || 0)).toFixed(1))
 
   return (
     <div>
@@ -70,7 +71,7 @@ export default function CloserDetail() {
         <KPICard label="Booked" value={mine.qualifiedBookings} subtitle={mine.calendarBookings > 0 ? 'calendar bookings assigned to them' : 'new-call rows on their EODs'} />
         <KPICard label="Live" value={mine.lives} subtitle={`${mine.fuLives} follow-up lives separately`} onClick={() => setShowCalls('live')} />
         <KPICard label="No shows" value={mine.noShows} subtitle={`${mine.reschedules} rescheduled · ${mine.cancels} cancelled`} onClick={() => setShowCalls('no_show')} />
-        <KPICard label="Offers" value={mine.offers} onClick={() => setShowCalls('offers')} />
+        <KPICard label="Offers" value={mine.offers ?? '—'} subtitle={mine.offers == null ? 'typed per EOD report, not split by region' : undefined} onClick={() => setShowCalls('offers')} />
         <KPICard label="Closes" value={mine.closes} subtitle={mine.ascensions > 0 ? `${mine.ascensions} ascensions separately` : undefined} onClick={() => setShowCalls('closes')} />
         <KPICard label="Trial cash" value={money(mine.trialCash)} subtitle={`${money(mine.trialRevenue)} revenue`} />
         <KPICard label="Ascension cash" value={money(mine.ascendCash)} subtitle={`${money(mine.ascendRevenue)} revenue`} />

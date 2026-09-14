@@ -71,6 +71,8 @@ async function fetchWavvAggregatesUncached(days = 30, region = 'all') {
       .from('wavv_calls')
       .select('user_id, phone_number, call_duration')
       .gte('started_at', `${since}T00:00:00`)
+      // A stable order, or paging past 1,000 rows (30 days is ~1,000 dials) can repeat or skip calls
+      .order('id')
       .range(offset, offset + pageSize - 1)
 
     if (error) {
@@ -133,7 +135,7 @@ export async function fetchWavvCallsForSTL(days = 30) {
       .from('wavv_calls')
       .select('phone_number, started_at, user_id')
       .gte('started_at', `${since}T00:00:00`)
-      .order('started_at', { ascending: false })
+      .order('started_at', { ascending: false }).order('id')
       .range(offset, offset + pageSize - 1)
 
     if (error) {
@@ -165,7 +167,7 @@ export async function fetchWavvCalls(days = 30) {
       .from('wavv_calls')
       .select('call_id, contact_name, phone_number, started_at, call_duration, user_id, team_id')
       .gte('started_at', `${since}T00:00:00`)
-      .order('started_at', { ascending: false })
+      .order('started_at', { ascending: false }).order('id')
       .range(offset, offset + pageSize - 1)
 
     if (error) {
