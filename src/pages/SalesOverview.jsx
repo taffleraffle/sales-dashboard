@@ -206,7 +206,6 @@ export default function SalesOverview() {
     const confPct = parseFloat(((conf / total) * 100).toFixed(1))
     return { conf, unconf, total, confPct, unconfPct: parseFloat((100 - confPct).toFixed(1)) }
   }, [m.totals])
-  const [revenueDeals, setRevenueDeals] = useState(null)
 
   // ── Pending EOD: check who hasn't submitted today ──
   const [pendingEOD, setPendingEOD] = useState({ closers: [], setters: [] })
@@ -260,42 +259,23 @@ export default function SalesOverview() {
     checkTodayCloses()
   }, [])
 
-  // The Revenue tile counts every EOD in the window, confirmed or not, because
-  // that is what the matview behind it does. m.calls deliberately holds only
-  // CONFIRMED reports, so building this list from it hid every deal whose EOD
-  // had not been ticked off yet and left the headline unexplainable: the tile
-  // said $27,097 while the list it opened showed $8,100. Read the window
-  // directly instead, and mark the rows still awaiting an EOD so the reason is
-  // visible rather than silent.
-  const openRevenueBreakdown = async () => {
-    setShowRevenueBreakdown(true)
-    setRevenueDeals(null)
-    if (!m.window) { setRevenueDeals([]); return }
-    const { data: reps } = await supabase
-      .from('closer_eod_reports')
-      .select('id, report_date, is_confirmed')
-      .gte('report_date', m.window.startStr)
-      .lte('report_date', m.window.endStr)
-    if (!reps?.length) { setRevenueDeals([]); return }
-    const meta = Object.fromEntries(reps.map(r => [r.id, r]))
-    const { data: rows } = await supabase
-      .from('closer_calls')
-      .select('eod_report_id, prospect_name, call_type, outcome, revenue, cash_collected')
-      .in('eod_report_id', reps.map(r => r.id))
-      .in('outcome', ['closed', 'ascended'])
-    setRevenueDeals(
-      (rows || [])
-        .map(c => ({
-          date: meta[c.eod_report_id]?.report_date,
-          prospect_name: (c.prospect_name || '—').split(' - ')[0],
-          call_type: c.call_type,
-          revenue: c.revenue,
-          cash_collected: c.cash_collected,
-          pending: !meta[c.eod_report_id]?.is_confirmed,
-        }))
-        .sort((x, y) => (y.date || '').localeCompare(x.date || ''))
-    )
-  }
+  // The deals behind the Revenue tile. m.calls already covers every EOD in the
+  // window (confirmed or not, flagged `pending`), drops excluded calls, and is
+  // split by region. This list used to query closer_calls itself with no
+  // region filter, so on AU it listed US deals under an Australian tile (Ben,
+  // 14 Sep 2026).
+  const revenueDeals = useMemo(() => m.calls
+    .filter(c => c.outcome === 'closed' || c.outcome === 'ascended')
+    .map(c => ({
+      date: c.report_date,
+      prospect_name: (c.prospect_name || '—').split(' - ')[0],
+      call_type: c.call_type,
+      revenue: c.revenue,
+      cash_collected: c.cash_collected,
+      pending: c.pending,
+    }))
+    .sort((x, y) => (y.date || '').localeCompare(x.date || '')), [m.calls])
+  const openRevenueBreakdown = () => setShowRevenueBreakdown(true)
 
 
   // Fetch WAVV calls and check endangered leads (live from GHL)
@@ -569,7 +549,7 @@ export default function SalesOverview() {
           <KPICard label="Ascend cash" value={money2(ct.ascendCash)} />
         </div>
         <div style={{ padding: '6px 0 0' }}>
-          {!revenueDeals ? (
+          {m.loading ? (
             <div className="flex items-center justify-center py-8"><Loader className="animate-spin" size={20} /></div>
           ) : (
             <LeaderTable
