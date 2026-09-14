@@ -1,4 +1,6 @@
 import { BASE_URL as GHL_BASE, GHL_LOCATION_ID, ghlFetch } from './ghlClient'
+import { supabase } from '../lib/supabase'
+import { isAuCalendlyBooking } from '../lib/region'
 
 const CANCEL_PATTERNS = [
   /\b(cancel|reschedule|can'?t make|won'?t make|not going to make|not able|unable|have to push|move|postpone|rain ?check)\b/i,
@@ -68,6 +70,45 @@ export async function fetchUpcomingAppointments() {
     .filter(r => r.status === 'fulfilled')
     .flatMap(r => r.value)
     .sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
+}
+
+/**
+ * Upcoming Australian strategy calls live on Calendly, not on a GHL calendar
+ * (Ben, 14 Sep 2026: on AU the list showed US calls and none of Ash's). The
+ * invitee is looked up in ghl_contacts by email so the same SMS / email
+ * engagement check can run on them; the phone comes from the booking itself.
+ */
+async function fetchUpcomingCalendly() {
+  const now = new Date()
+  const in7d = new Date(now.getTime() + 7 * 24 * 3600000)
+  const { data, error } = await supabase
+    .from('calendly_bookings')
+    .select('invitee_uri, invitee_name, invitee_email, invitee_phone, start_time, event_name, event_type_uri, status')
+    .eq('status', 'active')
+    .gte('start_time', now.toISOString())
+    .lte('start_time', in7d.toISOString())
+    .order('start_time', { ascending: true })
+  if (error || !data?.length) return []
+  // The table also holds the US "Strategy Call - IF" event; only the AUS one is Australian
+  const aus = data.filter(isAuCalendlyBooking)
+  const emails = [...new Set(aus.map(b => (b.invitee_email || '').toLowerCase()).filter(Boolean))]
+  const contactByEmail = {}
+  if (emails.length) {
+    const { data: contacts } = await supabase.from('ghl_contacts').select('ghl_contact_id, email').in('email', emails)
+    for (const c of contacts || []) if (c.email) contactByEmail[c.email.toLowerCase()] = c.ghl_contact_id
+  }
+  return aus
+    .filter(b => !/opt digital|test/i.test(b.invitee_name || ''))
+    .map(b => ({
+      ghl_event_id: b.invitee_uri,
+      ghl_contact_id: contactByEmail[(b.invitee_email || '').toLowerCase()] || null,
+      contact_name: b.invitee_name || '(Unknown)',
+      contact_phone: b.invitee_phone || null,
+      startTime: b.start_time,
+      appointment_date: (b.start_time || '').split('T')[0],
+      calendarName: b.event_name || 'Calendly',
+      appointmentStatus: 'confirmed',
+    }))
 }
 
 /**
@@ -187,9 +228,10 @@ async function checkContactEngagement(ghlContactId, apptTime) {
  *
  * @param {Array} wavvCalls - wavv_calls rows with phone_number, call_duration (pre-fetched)
  * @param {function} onProgress - optional callback(message) for loading state
+ * @param {string} region - 'all' | 'us' | 'au': US calls are on GHL calendars, AU calls on Calendly
  * @returns {Array} endangered leads
  */
-export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}) {
+export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}, region = 'all') {
   // Build WAVV lookup: normalized phone → longest call duration
   const wavvByPhone = {}
   for (const c of wavvCalls) {
@@ -200,8 +242,12 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
     }
   }
 
-  onProgress('Fetching upcoming appointments from GHL...')
-  const appointments = await fetchUpcomingAppointments()
+  onProgress('Fetching upcoming appointments...')
+  const [ghlAppts, calendlyAppts] = await Promise.all([
+    region === 'au' ? [] : fetchUpcomingAppointments(),
+    region === 'us' ? [] : fetchUpcomingCalendly(),
+  ])
+  const appointments = [...ghlAppts, ...calendlyAppts].sort((a, b) => new Date(a.startTime) - new Date(b.startTime))
   if (!appointments.length) return []
 
   onProgress(`Checking engagement for ${appointments.length} upcoming leads...`)
@@ -210,8 +256,8 @@ export async function checkEndangeredLeads(wavvCalls = [], onProgress = () => {}
   // Check engagement for each appointment in parallel
   const results = await Promise.allSettled(
     appointments.map(async (appt) => {
-      // Fetch contact phone from GHL
-      const phone = await fetchContactPhone(appt.ghl_contact_id)
+      // Calendly bookings carry the phone; GHL ones need a contact fetch
+      const phone = appt.contact_phone || await fetchContactPhone(appt.ghl_contact_id)
       const normalizedPhone = normalizePhone(phone)
       const longestCall = normalizedPhone ? (wavvByPhone[normalizedPhone] || 0) : 0
       const hasCall = longestCall > 40

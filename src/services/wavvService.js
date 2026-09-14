@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { sinceDate } from '../lib/dateUtils'
+import { isAuPhone } from '../lib/region'
 
 /**
  * Classify a call by duration:
@@ -52,11 +53,10 @@ export function clearWavvAggregatesCache() {
 /* WAVV stores bare numbers: US as ten digits, Australian as 61... or a local
    04 mobile. Dials were never filtered by region while sets were, so the
    Australian view showed a setter's US dials against Australian sets: 213
-   dials and 0 sets for Josh, a pickup and set rate that meant nothing. */
-export function isAuPhone(phone) {
-  const d = String(phone || '').replace(/\D/g, '')
-  return d.startsWith('61') || /^04\d{8}$/.test(d)
-}
+   dials and 0 sets for Josh, a pickup and set rate that meant nothing.
+   The rule itself lives in lib/region.js (shared with leads and speed to
+   lead): a bare "starts with 61" also matched US area codes 610-615. */
+export { isAuPhone }
 
 async function fetchWavvAggregatesUncached(days = 30, region = 'all') {
   const since = sinceDate(days)
