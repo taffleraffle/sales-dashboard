@@ -691,6 +691,17 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
     await record('notes', { ...(d.notes || {}), title: r.title, written_at: new Date().toISOString(), chars: r.transcript_chars, text: r.notes || '' })
     setNote(n => ({ ...n, notes: { ok: `Notes written${r.title ? ` from "${r.title}"` : ''}. Read them, fix anything, then copy or post.` } }))
   })
+  // Growth map (14 Sep 2026): the deal and the call notes go to the client
+  // dashboard, which proposes the towns. The closer or AM confirms them and
+  // builds the map there; the link is kept on the deal.
+  const startGrowthMap = () => run('growth', async () => {
+    const c = d.ghl_contact || contact || {}
+    const r = await callCloserHub('growth_map', { company: form.company, email: form.email, region: form.region,
+      website: c.website || '', phone: c.phone || '', notes: notes || d.notes?.text || '', ghl_contact_id: c.id || '' })
+    const m = r.map || {}
+    await record('growth_map', { id: m.id, setup_url: m.setup_url, created_at: new Date().toISOString() })
+    setNote(n => ({ ...n, notes: { ok: r.created === false ? 'This deal already has a growth map. Open it below.' : 'Growth map started. Claude is picking the towns; confirm them and build it in the dashboard.' } }))
+  })
   const postNotes = () => run('post', async () => {
     const channel = `opt-${slugOf(form.company)}`
     const r = await callCloserHub('post_notes', { channel, text: notes, company: form.company, email: form.email })
@@ -947,6 +958,14 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
                     {notes && (
                       <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={Math.min(40, Math.max(12, notes.split('\n').length + 2))} style={{ fontSize: 13, lineHeight: 1.5, fontFamily: 'inherit', background: '#fff' }} />
                     )}
+                  </div>
+                )}
+                {key === 'notes' && (notes || d.notes?.text || d.growth_map) && (
+                  <div className="flex items-center gap-2 flex-wrap mt-3">
+                    {d.growth_map?.setup_url
+                      ? <a href={d.growth_map.setup_url} target="_blank" rel="noopener" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }}>Open the growth map <ExternalLink size={ICON.sm} /></a>
+                      : <button type="button" className="editorial-btn-ghost" style={{ height: 32, fontSize: 12.5 }} onClick={startGrowthMap} disabled={busy === 'growth' || !form.company.trim()}>{busy === 'growth' ? 'Sending the notes' : 'Start the growth map'}</button>}
+                    <span style={{ fontSize: 12, color: 'var(--ink-4)' }}>Towns by trades and where new profiles go, for the onboarding call.</span>
                   </div>
                 )}
                 {n?.ok && <div style={{ marginTop: 6, fontSize: 12.5, color: 'var(--house-good)' }}>{n.ok}</div>}

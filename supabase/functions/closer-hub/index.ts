@@ -532,6 +532,40 @@ async function clientCard(body: any) {
   return { status: r.ok ? 200 : (r.status || 502), body: out }
 }
 
+// ── growth map ──────────────────────────────────────────────────────────────
+// Ben, 14 Sep 2026: every client gets a growth map (towns by trades, who ranks,
+// where new profiles go) to show on the onboarding call. The deal and its call
+// notes go to the client dashboard, which asks Claude for the towns. Nothing paid
+// runs from here: a person confirms the towns and builds the map in the dashboard.
+// One map per GHL contact; asking again returns the same map.
+async function growthMap(admin: any, who: Caller, body: any) {
+  const key = Deno.env.get('AGENT_WEBHOOK_KEY') || ''
+  if (!key) return { status: 500, body: { error: 'AGENT_WEBHOOK_KEY is not set' } }
+  const company = String(body.company || '').trim()
+  if (!company) return { status: 400, body: { error: 'Add the company first' } }
+  const payload = {
+    company, email: String(body.email || '').trim().toLowerCase(), region: String(body.region || '').toUpperCase(),
+    website: body.website || '', phone: body.phone || '', notes: String(body.notes || '').slice(0, 60000),
+    ghl_contact_id: String(body.ghl_contact_id || ''), closer_email: who.email,
+  }
+  const r = await fetch(`${DASHBOARD_BASE}/webhooks/agent/growth-map`, {
+    method: 'POST', headers: { 'X-Webhook-Key': key, 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
+  })
+  const out = await r.json().catch(() => ({ error: `dashboard answered ${r.status}` }))
+  await log(admin, who, 'growth_map', { company, ghl_contact_id: payload.ghl_contact_id }, r.ok, out)
+  return { status: r.ok ? 200 : (r.status || 502), body: out }
+}
+
+async function growthMapStatus(body: any) {
+  const key = Deno.env.get('AGENT_WEBHOOK_KEY') || ''
+  if (!key) return { status: 500, body: { error: 'AGENT_WEBHOOK_KEY is not set' } }
+  const id = String(body.ghl_contact_id || '').trim()
+  if (!id) return { status: 200, body: { ok: true, map: null } }
+  const r = await fetch(`${DASHBOARD_BASE}/webhooks/agent/growth-map?${new URLSearchParams({ ghl_contact_id: id })}`, { headers: { 'X-Webhook-Key': key } })
+  const out = await r.json().catch(() => ({ error: `dashboard answered ${r.status}` }))
+  return { status: r.ok ? 200 : (r.status || 502), body: out }
+}
+
 // ── post-call notes ─────────────────────────────────────────────────────────
 // Ben, 13 Sep 2026: "take a Fathom transcript and then spit out something
 // like this". The closer pastes the Fathom share link (or the transcript);
@@ -718,6 +752,8 @@ serve(async (req) => {
       case 'call_notes': out = await callNotes(admin, who, body); break
       case 'post_notes': out = await postNotes(admin, who, body); break
       case 'client_card': out = await clientCard(body); break
+      case 'growth_map': out = await growthMap(admin, who, body); break
+      case 'growth_map_status': out = await growthMapStatus(body); break
       case 'ghl_move': out = await ghlMove(admin, who, body); break
       case 'create_contract': out = await createContract(admin, who, body); break
       case 'send_contract': out = await sendContract(admin, who, body); break
