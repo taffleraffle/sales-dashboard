@@ -692,15 +692,15 @@ function Deal({ settings, onDone, profile, user, onRegion }) {
     setNote(n => ({ ...n, notes: { ok: `Notes written${r.title ? ` from "${r.title}"` : ''}. Read them, fix anything, then copy or post.` } }))
   })
   // Growth map (14 Sep 2026): the deal and the call notes go to the client
-  // dashboard, which proposes the towns. The closer or AM confirms them and
-  // builds the map there; the link is kept on the deal.
+  // dashboard, which reads the call, places the towns and builds the map on its
+  // own (15 Sep: "just makes it from the sales call"). The link is kept on the deal.
   const startGrowthMap = () => run('growth', async () => {
     const c = d.ghl_contact || contact || {}
     const r = await callCloserHub('growth_map', { company: form.company, email: form.email, region: form.region,
       website: c.website || '', phone: c.phone || '', notes: notes || d.notes?.text || '', ghl_contact_id: c.id || '' })
     const m = r.map || {}
     await record('growth_map', { id: m.id, setup_url: m.setup_url, created_at: new Date().toISOString() })
-    setNote(n => ({ ...n, notes: { ok: r.created === false ? 'This deal already has a growth map. Open it below.' : 'Growth map started. Claude is picking the towns; confirm them and build it in the dashboard.' } }))
+    setNote(n => ({ ...n, notes: { ok: r.created === false ? 'This deal already has a growth map. Open it below.' : 'Growth map started. It reads the call and builds itself in a few minutes; open it from the link below.' } }))
   })
   const postNotes = () => run('post', async () => {
     const channel = `opt-${slugOf(form.company)}`
